@@ -1,0 +1,15 @@
+question:
+Just-in-time compilation tends to be the fastest way to implement dynamically 
+typed languages, but not all of them use it. What reasons are there to not JIT?
+
+answer:
+- Significant added complexity: a JIT is effectively a compiler backend that needs 
+to target multiple CPU architectures, which is a large maintenance burden
+- Startup overhead: JIT compilation takes time to "warm up," so for short-lived programs 
+an interpreter can finish running before the JIT would even pay off
+- Higher memory usage, which matters on constrained or embedded devices
+- Platform restrictions: some environments don't allow generating and executing code at 
+runtime, ruling out JIT entirely
+- Lower payoff when performance isn't the priority: if a language isn't running 
+performance-critical workloads, the added complexity of a JIT may not be justified
+

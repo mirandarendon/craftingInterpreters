@@ -1,0 +1,12 @@
+Question:
+Pick an open source implementation of a language you like. Download the source code 
+and poke around in it. Try to find the code that implements the scanner and parser. 
+Are they handwritten, or generated using tools like Lex and Yacc? (.l or .y files 
+usually imply the latter.)
+
+answer:
+I reviewed the OpenJDK javac source and found no .l or .y files, this is not a Lex or Yacc-generated
+implementation, both components are handwritten Java. The Scanner class converts source text into a 
+stream of tokens, and JavacParser converts that token stream into a syntax tree. The parser uses a 
+top-down, recursive descent approach: it reads through the tokens and decides how to build the tree 
+as it goes, rather than working from a generated grammar table.

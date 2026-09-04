@@ -1,0 +1,11 @@
+question:
+Most Lisp implementations that compile to C also contain an interpreter that 
+lets them execute Lisp code on the fly as well. Why?
+
+answer:
+Development is often interactive, and code is frequently generated and evaluated 
+at runtime. Compiling all the way to C and then invoking a build and link step 
+for every such case would introduce too much overhead for that workflow. The 
+interpreter handles code that needs to run immediately, while the compiler is 
+reserved for code that benefits from being fast.
+
