@@ -1,0 +1,10 @@
+question:
+Write some sample Lox programs and run them (you can use the 
+implementations of Lox in my repository). Try to come up with 
+edge case behavior I didn’t specify here. Does it do what you 
+expect? Why or why not?
+
+answer:
+- a declared-but-uninitialized variable (var a;) prints as nil, not an error.
+- 1 + "2" → runtime error (Operands must be two numbers or two strings) + doesn't 
+auto-convert between numbers and strings, but "1" + "2" works fine ("12").

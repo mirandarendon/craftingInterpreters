@@ -1,0 +1,9 @@
+question:
+Lox is a pretty tiny language. What features do you think it is 
+missing that would make it annoying to use for real programs? 
+(Aside from the standard library, of course.)
+
+answer:
+- no module or file-import system, so any real program has to live in one file.
+- no way to catch errors — a runtime error just kills the whole program.
+- no arrays/lists or maps/dictionaries at all — nothing built-in to hold a collection of values.

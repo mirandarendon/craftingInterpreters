@@ -1,0 +1,6 @@
+fun tease(name) {
+  print name + ", you're doing great. Probably.";
+}
+
+tease("miranda");
+tease("billy");
