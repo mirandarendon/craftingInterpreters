@@ -23,7 +23,32 @@ class Parser {
     }
 
     private Expr expression() {
-        return equality();
+        return comma();
+    }
+
+    private Expr comma() {
+        Expr expr = ternary();
+
+        while (match(COMMA)) {
+        Token operator = previous();
+        Expr right = ternary();
+        expr = new Expr.Binary(expr, operator, right);
+        }
+
+        return expr;
+    }
+
+    private Expr ternary() {
+        Expr expr = equality();
+
+        if (match(QUESTION)) {
+        Expr thenBranch = expression();
+        consume(COLON, "Expect ':' after then branch of ternary expression.");
+        Expr elseBranch = ternary();
+        expr = new Expr.Ternary(expr, thenBranch, elseBranch);
+        }
+
+        return expr;
     }
 
     private Expr equality() {
@@ -97,6 +122,39 @@ class Parser {
         Expr expr = expression();
         consume(RIGHT_PAREN, "Expect ')' after expression.");
         return new Expr.Grouping(expr);
+        }
+
+        // Error productions: a binary operator with no left-hand operand.
+        // Report the error, then parse and discard the right-hand operand
+        // at that operator's precedence so parsing can continue.
+        if (match(COMMA)) {
+        error(previous(), "Missing left-hand operand.");
+        comma();
+        return null;
+        }
+
+        if (match(BANG_EQUAL, EQUAL_EQUAL)) {
+        error(previous(), "Missing left-hand operand.");
+        equality();
+        return null;
+        }
+
+        if (match(GREATER, GREATER_EQUAL, LESS, LESS_EQUAL)) {
+        error(previous(), "Missing left-hand operand.");
+        comparison();
+        return null;
+        }
+
+        if (match(PLUS)) {
+        error(previous(), "Missing left-hand operand.");
+        term();
+        return null;
+        }
+
+        if (match(SLASH, STAR)) {
+        error(previous(), "Missing left-hand operand.");
+        factor();
+        return null;
         }
 
         throw error(peek(), "Expect expression.");
