@@ -1,5 +1,6 @@
 package com.craftinginterpreters.lox;
 
+// Ch5 Challenge 3: print expressions in reverse Polish notation.
 class RpnPrinter implements Expr.Visitor<String> {
   String print(Expr expr) {
     return expr.accept(this);
@@ -22,6 +23,7 @@ class RpnPrinter implements Expr.Visitor<String> {
     return expr.value.toString();
   }
 
+  // Ch6 Challenge 2: print the ternary operator ?: in RPN.
   @Override
   public String visitTernaryExpr(Expr.Ternary expr) {
     return expr.condition.accept(this) + " " + expr.thenBranch.accept(this) +

@@ -21,6 +21,7 @@ class AstPrinter implements Expr.Visitor<String> {
     return expr.value.toString();
   }
 
+  // Ch6 Challenge 2: print the ternary operator ?:.
   @Override
   public String visitTernaryExpr(Expr.Ternary expr) {
     return parenthesize("?:", expr.condition, expr.thenBranch, expr.elseBranch);

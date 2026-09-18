@@ -16,6 +16,7 @@ public class GenerateAst {
       "Binary   : Expr left, Token operator, Expr right",
       "Grouping : Expr expression",
       "Literal  : Object value",
+      // Ch6 Challenge 2: AST node for the ternary operator ?:.
       "Ternary  : Expr condition, Expr thenBranch, Expr elseBranch",
       "Unary    : Token operator, Expr right"
     ));

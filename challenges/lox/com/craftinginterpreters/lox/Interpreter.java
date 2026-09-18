@@ -98,6 +98,8 @@ class Interpreter implements Expr.Visitor<Object> {
                     return (double)left + (double)right;
                 }
 
+                // Ch7 Challenge 2: string concatenation coerces the other
+                // operand to a string if either side is already a string.
                 if (left instanceof String || right instanceof String) {
                     return stringify(left) + stringify(right);
                 }
@@ -106,6 +108,8 @@ class Interpreter implements Expr.Visitor<Object> {
             "Operands must be two numbers or two strings.");
             case SLASH:
                 checkNumberOperands(expr.operator, left, right);
+                // Ch7 Challenge 3: report division by zero as a runtime error
+                // instead of silently producing Infinity/NaN.
                 if ((double)right == 0) {
                     throw new RuntimeError(expr.operator, "Divide by zero.");
                 }
@@ -115,6 +119,8 @@ class Interpreter implements Expr.Visitor<Object> {
                 return (double)left * (double)right;
             case BANG_EQUAL: return !isEqual(left, right);
             case EQUAL_EQUAL: return isEqual(left, right);
+            // Ch6 Challenge 1: comma operator evaluates both operands
+            // (already done above) and returns the right one.
             case COMMA: return right;
         }
 
@@ -122,6 +128,7 @@ class Interpreter implements Expr.Visitor<Object> {
         return null;
     }
 
+    // Ch6 Challenge 2: ternary operator only evaluates the taken branch.
     @Override
     public Object visitTernaryExpr(Expr.Ternary expr) {
         if (isTruthy(evaluate(expr.condition))) {

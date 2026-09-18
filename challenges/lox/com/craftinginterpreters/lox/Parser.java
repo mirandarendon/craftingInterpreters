@@ -26,6 +26,7 @@ class Parser {
         return comma();
     }
 
+    // Ch6 Challenge 1: comma operator, lowest precedence, left-associative.
     private Expr comma() {
         Expr expr = ternary();
 
@@ -38,6 +39,7 @@ class Parser {
         return expr;
     }
 
+    // Ch6 Challenge 2: ternary operator ?:, right-associative.
     private Expr ternary() {
         Expr expr = equality();
 
@@ -124,9 +126,10 @@ class Parser {
         return new Expr.Grouping(expr);
         }
 
-        // Error productions: a binary operator with no left-hand operand.
-        // Report the error, then parse and discard the right-hand operand
-        // at that operator's precedence so parsing can continue.
+        // Ch6 Challenge 3: error productions for a binary operator with no
+        // left-hand operand. Report the error, then parse and discard the
+        // right-hand operand at that operator's precedence so parsing can
+        // continue.
         if (match(COMMA)) {
         error(previous(), "Missing left-hand operand.");
         comma();

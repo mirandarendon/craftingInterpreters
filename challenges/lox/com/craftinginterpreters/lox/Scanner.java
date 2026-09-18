@@ -63,6 +63,7 @@ class Scanner {
       case '+': addToken(PLUS); break;
       case ';': addToken(SEMICOLON); break;
       case '*': addToken(STAR); break;
+      // Ch6 Challenge 2: ternary operator ?:
       case '?': addToken(QUESTION); break;
       case ':': addToken(COLON); break;
       case '!': addToken(match('=') ? BANG_EQUAL : BANG); break;
@@ -74,6 +75,7 @@ class Scanner {
           // A line comment goes until the end of the line.
           while (peek() != '\n' && !isAtEnd()) advance();
         } else if (match('*')) {
+          // Ch4 Challenge 4: nestable C-style block comments.
           blockComment();
         } else {
           addToken(SLASH);
@@ -104,6 +106,7 @@ class Scanner {
     }
   }
 
+  // Ch4 Challenge 4: /* ... */ block comments, allowing nesting.
   private void blockComment() {
     int nesting = 1;
 
