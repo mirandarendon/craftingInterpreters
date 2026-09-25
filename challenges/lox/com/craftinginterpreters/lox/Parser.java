@@ -9,10 +9,19 @@ class Parser {
     private static class ParseError extends RuntimeException {}
 
     private final List<Token> tokens;
+    // Ch8 Challenge 1: when parsing REPL input, a bare expression with no
+    // trailing ';' is treated as an expression to print rather than a
+    // syntax error.
+    private final boolean replMode;
     private int current = 0;
 
     Parser(List<Token> tokens) {
+        this(tokens, false);
+    }
+
+    Parser(List<Token> tokens, boolean replMode) {
         this.tokens = tokens;
+        this.replMode = replMode;
     }
 
     List<Stmt> parse() {
@@ -61,6 +70,13 @@ class Parser {
 
     private Stmt expressionStatement() {
         Expr expr = expression();
+
+        // Ch8 Challenge 1: at the REPL, a bare expression typed with no
+        // trailing ';' is displayed instead of requiring a semicolon.
+        if (replMode && isAtEnd()) {
+            return new Stmt.Print(expr);
+        }
+
         consume(SEMICOLON, "Expect ';' after expression.");
         return new Stmt.Expression(expr);
     }

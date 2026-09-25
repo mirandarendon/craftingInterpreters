@@ -42,15 +42,21 @@ public class Lox {
       System.out.print("> ");
       String line = reader.readLine();
       if (line == null) break;
-      run(line);
+      // Ch8 Challenge 1: parse REPL input in replMode so a bare expression
+      // will be evaluated and printed.
+      run(line, true);
       hadError = false;
     }
   }
 
   private static void run(String source) {
+    run(source, false);
+  }
+
+  private static void run(String source, boolean replMode) {
     Scanner scanner = new Scanner(source);
     List<Token> tokens = scanner.scanTokens();
-    Parser parser = new Parser(tokens);
+    Parser parser = new Parser(tokens, replMode);
     List<Stmt> statements = parser.parse();
 
     // Stop if there was a syntax error.
