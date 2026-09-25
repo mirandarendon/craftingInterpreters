@@ -14,6 +14,10 @@ class Parser {
     // trailing ';' is treated as an expression to print rather than a
     // syntax error.
     private final boolean replMode;
+    // Ch9 Challenge 3: counts how many loops we're nested inside while
+    // parsing, so a 'break' outside any loop can be flagged as a syntax
+    // error.
+    private int loopDepth = 0;
     private int current = 0;
 
     Parser(List<Token> tokens) {
@@ -57,6 +61,7 @@ class Parser {
     }
 
     private Stmt statement() {
+        if (match(BREAK)) return breakStatement();
         if (match(FOR)) return forStatement();
         if (match(IF)) return ifStatement();
         if (match(PRINT)) return printStatement();
@@ -64,6 +69,16 @@ class Parser {
         if (match(LEFT_BRACE)) return new Stmt.Block(block());
 
         return expressionStatement();
+    }
+
+    // Ch9 Challenge 3: 'break;' is only legal inside a loop; report it as a
+    // syntax error otherwise but keep parsing.
+    private Stmt breakStatement() {
+        if (loopDepth == 0) {
+            error(previous(), "Must be inside a loop to use 'break'.");
+        }
+        consume(SEMICOLON, "Expect ';' after 'break'.");
+        return new Stmt.Break();
     }
 
     private Stmt forStatement() {
@@ -90,7 +105,15 @@ class Parser {
         }
         consume(RIGHT_PAREN, "Expect ')' after for clauses.");
 
-        Stmt body = statement();
+        // Ch9 Challenge 3: the for-loop body is a loop body, so 'break'
+        // is legal inside it.
+        loopDepth++;
+        Stmt body;
+        try {
+            body = statement();
+        } finally {
+            loopDepth--;
+        }
 
         if (increment != null) {
             body = new Stmt.Block(Arrays.asList(
@@ -125,7 +148,16 @@ class Parser {
         consume(LEFT_PAREN, "Expect '(' after 'while'.");
         Expr condition = expression();
         consume(RIGHT_PAREN, "Expect ')' after condition.");
-        Stmt body = statement();
+
+        // Ch9 Challenge 3: track that we're inside a loop while parsing
+        // the body, so 'break' is legal here.
+        loopDepth++;
+        Stmt body;
+        try {
+            body = statement();
+        } finally {
+            loopDepth--;
+        }
 
         return new Stmt.While(condition, body);
     }

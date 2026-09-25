@@ -3,6 +3,11 @@ package com.craftinginterpreters.lox;
 import java.util.List;
 
 class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
+    // Ch9 Challenge 3: thrown by a 'break' statement to unwind the Java
+    // call stack, through any nested blocks/if statements, up to the
+    // nearest enclosing loop.
+    private static class BreakException extends RuntimeException {}
+
     private Environment environment = new Environment();
 
     @Override
@@ -237,10 +242,22 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitWhileStmt(Stmt.While stmt) {
-        while (isTruthy(evaluate(stmt.condition))) {
-            execute(stmt.body);
+        // Ch9 Challenge 3: a BreakException thrown anywhere inside the body
+        // (however deeply nested in blocks/ifs) propagates up through
+        // execute()/executeBlock() and is caught here, ending the loop.
+        try {
+            while (isTruthy(evaluate(stmt.condition))) {
+                execute(stmt.body);
+            }
+        } catch (BreakException ex) {
+            // Fall through: the loop simply ends.
         }
         return null;
+    }
+
+    @Override
+    public Void visitBreakStmt(Stmt.Break stmt) {
+        throw new BreakException();
     }
 
 }

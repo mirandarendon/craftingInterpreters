@@ -26,6 +26,9 @@ public class GenerateAst {
 
     defineAst(outputDir, "Stmt", Arrays.asList(
       "Block      : List<Stmt> statements",
+      // Ch9 Challenge 3: 'break' has no fields; it just unwinds to the
+      // nearest enclosing loop at runtime.
+      "Break      :",
       "Expression : Expr expression",
       "If         : Expr condition, Stmt thenBranch, Stmt elseBranch",
       "Print      : Expr expression",
@@ -51,7 +54,8 @@ public class GenerateAst {
     // The AST classes.
     for (String type : types) {
       String className = type.split(":")[0].trim();
-      String fields = type.split(":")[1].trim();
+      // Ch9 Challenge 3: allow a type with no fields, e.g. "Break :".
+      String fields = type.split(":", 2)[1].trim();
       defineType(writer, baseName, className, fields);
     }
 
@@ -86,10 +90,14 @@ public class GenerateAst {
     writer.println("    " + className + "(" + fieldList + ") {");
 
     // Store parameters in fields.
-    String[] fields = fieldList.split(", ");
-    for (String field : fields) {
-      String name = field.split(" ")[1];
-      writer.println("      this." + name + " = " + name + ";");
+    // Ch9 Challenge 3: a type with no fields (e.g. Break) has nothing to
+    // assign here.
+    if (!fieldList.isEmpty()) {
+      String[] fields = fieldList.split(", ");
+      for (String field : fields) {
+        String name = field.split(" ")[1];
+        writer.println("      this." + name + " = " + name + ";");
+      }
     }
 
     writer.println("    }");
@@ -103,9 +111,11 @@ public class GenerateAst {
     writer.println("    }");
 
     // Fields.
-    writer.println();
-    for (String field : fields) {
-      writer.println("    final " + field + ";");
+    if (!fieldList.isEmpty()) {
+      writer.println();
+      for (String field : fieldList.split(", ")) {
+        writer.println("    final " + field + ";");
+      }
     }
 
     writer.println("  }");
