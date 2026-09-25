@@ -35,6 +35,16 @@ class RpnPrinter implements Expr.Visitor<String> {
     return expr.right.accept(this) + " " + expr.operator.lexeme;
   }
 
+  @Override
+  public String visitVariableExpr(Expr.Variable expr) {
+    return expr.name.lexeme;
+  }
+
+  @Override
+  public String visitAssignExpr(Expr.Assign expr) {
+    return expr.value.accept(this) + " " + expr.name.lexeme + " =";
+  }
+
   public static void main(String[] args) {
     // (1 + 2) * (4 - 3)
     Expr expression = new Expr.Binary(
