@@ -64,4 +64,32 @@ class Environment {
   void defineUninitialized(String name) {
     values.put(name, UNINITIALIZED);
   }
+
+  // Ch11: resolved-distance lookup/assignment, used once the Resolver has
+  // precomputed how many environments up a variable lives. Takes a Token
+  // (not just the lexeme) so the Ch8 Challenge 2 uninitialized-variable
+  // check below can still report a proper RuntimeError.
+  Object getAt(int distance, Token name) {
+    Object value = ancestor(distance).values.get(name.lexeme);
+
+    if (value == UNINITIALIZED) {
+      throw new RuntimeError(name,
+          "Uninitialized variable '" + name.lexeme + "'.");
+    }
+
+    return value;
+  }
+
+  void assignAt(int distance, Token name, Object value) {
+    ancestor(distance).values.put(name.lexeme, value);
+  }
+
+  Environment ancestor(int distance) {
+    Environment environment = this;
+    for (int i = 0; i < distance; i++) {
+      environment = environment.enclosing;
+    }
+
+    return environment;
+  }
 }
