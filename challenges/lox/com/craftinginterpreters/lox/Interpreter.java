@@ -68,6 +68,14 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         return function.call(this, arguments);
     }
 
+    // Ch10 Challenge 2: an anonymous function expression evaluates to a
+    // callable with no name bound to it; the declaration's name token is
+    // null, which LoxFunction.toString() accounts for.
+    @Override
+    public Object visitFunctionExpr(Expr.Function expr) {
+        return new LoxFunction(new Stmt.Function(null, expr.params, expr.body), environment);
+    }
+
     @Override
     public Object visitLogicalExpr(Expr.Logical expr) {
         Object left = evaluate(expr.left);

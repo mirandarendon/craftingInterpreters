@@ -19,6 +19,9 @@ public class GenerateAst {
       "Grouping : Expr expression",
       "Literal  : Object value",
       "Logical  : Expr left, Token operator, Expr right",
+      // Ch10 Challenge 2: anonymous function expression, e.g.
+      // 'fun (a) { print a; }' used as a value rather than a declaration.
+      "Function : List<Token> params, List<Stmt> body",
       // Ch6 Challenge 2: AST node for the ternary operator ?:.
       "Ternary  : Expr condition, Expr thenBranch, Expr elseBranch",
       "Unary    : Token operator, Expr right",

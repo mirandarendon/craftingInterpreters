@@ -62,6 +62,13 @@ class RpnPrinter implements Expr.Visitor<String> {
     return builder.toString();
   }
 
+  // Ch10 Challenge 2: an anonymous function expression doesn't carry
+  // enough to meaningfully print its body here.
+  @Override
+  public String visitFunctionExpr(Expr.Function expr) {
+    return "<fn>";
+  }
+
   public static void main(String[] args) {
     // (1 + 2) * (4 - 3)
     Expr expression = new Expr.Binary(

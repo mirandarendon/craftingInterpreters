@@ -57,6 +57,13 @@ class AstPrinter implements Expr.Visitor<String> {
     return parenthesize("call", exprs);
   }
 
+  // Ch10 Challenge 2: an anonymous function expression doesn't carry
+  // enough to meaningfully print its body here.
+  @Override
+  public String visitFunctionExpr(Expr.Function expr) {
+    return "<fn>";
+  }
+
   private String parenthesize(String name, Expr... exprs) {
     StringBuilder builder = new StringBuilder();
 

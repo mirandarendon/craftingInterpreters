@@ -34,6 +34,9 @@ class LoxFunction implements LoxCallable {
 
   @Override
   public String toString() {
+    // Ch10 Challenge 2: an anonymous function expression has no name
+    // token attached to its declaration.
+    if (declaration.name == null) return "<fn anonymous>";
     return "<fn " + declaration.name.lexeme + ">";
   }
 }

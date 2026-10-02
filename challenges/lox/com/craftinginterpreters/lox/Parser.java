@@ -40,7 +40,16 @@ class Parser {
 
     private Stmt declaration() {
         try {
-            if (match(FUN)) return function("function");
+            // Ch10 Challenge 2: 'fun' only starts a named declaration when
+            // it's immediately followed by a name. 'fun (a) {...}' with no
+            // name (whether standalone, as in 'fun () {};', or passed as
+            // an argument) is an anonymous function *expression* instead,
+            // so we leave it for statement() -> expressionStatement() ->
+            // ... -> primary() to parse.
+            if (check(FUN) && checkNext(IDENTIFIER)) {
+                advance();
+                return function("function");
+            }
             if (match(VAR)) return varDeclaration();
             return statement();
         } catch (ParseError error) {
@@ -51,7 +60,14 @@ class Parser {
 
     private Stmt.Function function(String kind) {
         Token name = consume(IDENTIFIER, "Expect " + kind + " name.");
-        consume(LEFT_PAREN, "Expect '(' after " + kind + " name.");
+        Expr.Function body = functionBody(kind);
+        return new Stmt.Function(name, body.params, body.body);
+    }
+
+    // Ch10 Challenge 2: the "(params) { body }" portion is shared by named
+    // function declarations and anonymous function expressions.
+    private Expr.Function functionBody(String kind) {
+        consume(LEFT_PAREN, "Expect '(' after 'fun'.");
         List<Token> parameters = new ArrayList<>();
         if (!check(RIGHT_PAREN)) {
             do {
@@ -66,7 +82,7 @@ class Parser {
 
         consume(LEFT_BRACE, "Expect '{' before " + kind + " body.");
         List<Stmt> body = block();
-        return new Stmt.Function(name, parameters, body);
+        return new Expr.Function(parameters, body);
     }
 
     private Stmt varDeclaration() {
@@ -412,6 +428,13 @@ class Parser {
         return new Expr.Grouping(expr);
         }
 
+        // Ch10 Challenge 2: anonymous function expression, e.g.
+        // 'fun (a) { print a; }' used directly as a value. declaration()
+        // only routes here when 'fun' isn't immediately followed by a name.
+        if (match(FUN)) {
+        return functionBody("function");
+        }
+
         // Ch6 Challenge 3: error productions for a binary operator with no
         // left-hand operand. Report the error, then parse and discard the
         // right-hand operand at that operator's precedence so parsing can
@@ -469,6 +492,16 @@ class Parser {
     private boolean check(TokenType type) {
         if (isAtEnd()) return false;
         return peek().type == type;
+    }
+
+    // Ch10 Challenge 2: look one token past the current one, used to tell
+    // a named function declaration ('fun name(...)') apart from an
+    // anonymous function expression ('fun (...)') without consuming
+    // anything.
+    private boolean checkNext(TokenType type) {
+        if (isAtEnd()) return false;
+        if (tokens.get(current + 1).type == EOF) return false;
+        return tokens.get(current + 1).type == type;
     }
 
     private Token advance() {
