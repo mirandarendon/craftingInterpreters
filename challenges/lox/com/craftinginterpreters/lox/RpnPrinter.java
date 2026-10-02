@@ -51,6 +51,17 @@ class RpnPrinter implements Expr.Visitor<String> {
         " " + expr.operator.lexeme;
   }
 
+  @Override
+  public String visitCallExpr(Expr.Call expr) {
+    StringBuilder builder = new StringBuilder();
+    builder.append(expr.callee.accept(this));
+    for (Expr argument : expr.arguments) {
+      builder.append(" ").append(argument.accept(this));
+    }
+    builder.append(" call");
+    return builder.toString();
+  }
+
   public static void main(String[] args) {
     // (1 + 2) * (4 - 3)
     Expr expression = new Expr.Binary(
