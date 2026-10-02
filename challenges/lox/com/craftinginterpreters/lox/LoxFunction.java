@@ -18,10 +18,12 @@ class LoxFunction implements LoxCallable {
 
   @Override
   public Object call(Interpreter interpreter, List<Object> arguments) {
+    // Ch11 Q4: this environment is always a fresh local frame (never the
+    // global one), so parameters always go through the slot-array path —
+    // matching the single scope resolveFunction() opens for params+body.
     Environment environment = new Environment(closure);
     for (int i = 0; i < declaration.params.size(); i++) {
-      environment.define(declaration.params.get(i).lexeme,
-          arguments.get(i));
+      environment.defineLocal(arguments.get(i));
     }
 
     try {

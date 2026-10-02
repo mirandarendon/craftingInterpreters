@@ -11,8 +11,24 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     FUNCTION
   }
 
+  // Ch11 Q3 + Q4: everything the resolver tracks about one local variable
+  // — its declaration site (for error messages), whether its initializer
+  // has finished resolving yet, whether it's ever been read or assigned,
+  // and the array slot it owns within its scope.
+  private static class VariableInfo {
+    final Token name;
+    final int slot;
+    boolean defined = false;
+    boolean used = false;
+
+    VariableInfo(Token name, int slot) {
+      this.name = name;
+      this.slot = slot;
+    }
+  }
+
   private final Interpreter interpreter;
-  private final Stack<Map<String, Boolean>> scopes = new Stack<>();
+  private final Stack<Map<String, VariableInfo>> scopes = new Stack<>();
   private FunctionType currentFunction = FunctionType.NONE;
 
   Resolver(Interpreter interpreter) {
@@ -34,32 +50,51 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   }
 
   private void beginScope() {
-    scopes.push(new HashMap<String, Boolean>());
+    scopes.push(new HashMap<String, VariableInfo>());
   }
 
   private void endScope() {
-    scopes.pop();
+    Map<String, VariableInfo> scope = scopes.pop();
+
+    // Ch11 Q3: flag any local that was declared in this scope but never
+    // read or assigned to afterward.
+    for (VariableInfo variable : scope.values()) {
+      if (!variable.used) {
+        Lox.error(variable.name,
+            "Local variable '" + variable.name.lexeme + "' is never used.");
+      }
+    }
   }
 
   private void declare(Token name) {
     if (scopes.isEmpty()) return;
 
-    Map<String, Boolean> scope = scopes.peek();
+    Map<String, VariableInfo> scope = scopes.peek();
     if (scope.containsKey(name.lexeme)) {
       Lox.error(name, "Already a variable with this name in this scope.");
     }
-    scope.put(name.lexeme, false);
+
+    // Ch11 Q4: slots are handed out in declaration order, starting at 0.
+    // The Interpreter mirrors this exactly — it appends each local's
+    // value to its Environment's slot array in that same order — so this
+    // index always lines up with where the value actually lands.
+    int slot = scope.size();
+    scope.put(name.lexeme, new VariableInfo(name, slot));
   }
 
   private void define(Token name) {
     if (scopes.isEmpty()) return;
-    scopes.peek().put(name.lexeme, true);
+    scopes.peek().get(name.lexeme).defined = true;
   }
 
   private void resolveLocal(Expr expr, Token name) {
     for (int i = scopes.size() - 1; i >= 0; i--) {
-      if (scopes.get(i).containsKey(name.lexeme)) {
-        interpreter.resolve(expr, scopes.size() - 1 - i);
+      VariableInfo variable = scopes.get(i).get(name.lexeme);
+      if (variable != null) {
+        // Ch11 Q3: this reference (read or write) counts as a use.
+        variable.used = true;
+        // Ch11 Q4: report both the scope distance and the variable's slot.
+        interpreter.resolve(expr, scopes.size() - 1 - i, variable.slot);
         return;
       }
     }
@@ -224,10 +259,12 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
   @Override
   public Void visitVariableExpr(Expr.Variable expr) {
-    if (!scopes.isEmpty() &&
-        scopes.peek().get(expr.name.lexeme) == Boolean.FALSE) {
-      Lox.error(expr.name,
-          "Can't read local variable in its own initializer.");
+    if (!scopes.isEmpty()) {
+      VariableInfo variable = scopes.peek().get(expr.name.lexeme);
+      if (variable != null && !variable.defined) {
+        Lox.error(expr.name,
+            "Can't read local variable in its own initializer.");
+      }
     }
 
     resolveLocal(expr, expr.name);

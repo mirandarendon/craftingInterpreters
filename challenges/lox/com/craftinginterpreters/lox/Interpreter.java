@@ -11,11 +11,25 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     // nearest enclosing loop.
     private static class BreakException extends RuntimeException {}
 
+    // Ch11 Q4: a variable's statically-resolved location — how many
+    // enclosing scopes up (distance) and which array slot within that
+    // scope (slot) — so the interpreter can fetch it by index instead of
+    // hashing its name every time.
+    private static class VarLocation {
+        final int distance;
+        final int slot;
+
+        VarLocation(int distance, int slot) {
+            this.distance = distance;
+            this.slot = slot;
+        }
+    }
+
     final Environment globals = new Environment();
     private Environment environment = globals;
-    // Ch11: side table of resolved scope distances, filled in by the
-    // Resolver before interpret() runs.
-    private final Map<Expr, Integer> locals = new HashMap<>();
+    // Ch11 Q4: side table of resolved (distance, slot) pairs, filled in by
+    // the Resolver before interpret() runs.
+    private final Map<Expr, VarLocation> locals = new HashMap<>();
 
     Interpreter() {
         globals.define("clock", new LoxCallable() {
@@ -42,13 +56,14 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         return lookUpVariable(expr.name, expr);
     }
 
-    // Ch11: use the Resolver's precomputed distance when one exists;
-    // otherwise (e.g. a reference to a global) fall back to the dynamic
+    // Ch11 Q4: use the Resolver's precomputed (distance, slot) when one
+    // exists — an O(1) array index instead of a map lookup; otherwise
+    // (e.g. a reference to a global) fall back to the dynamic by-name
     // lookup through the global environment.
     private Object lookUpVariable(Token name, Expr expr) {
-        Integer distance = locals.get(expr);
-        if (distance != null) {
-            return environment.getAt(distance, name);
+        VarLocation location = locals.get(expr);
+        if (location != null) {
+            return environment.getAt(location.distance, location.slot, name);
         } else {
             return globals.get(name);
         }
@@ -58,9 +73,9 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     public Object visitAssignExpr(Expr.Assign expr) {
         Object value = evaluate(expr.value);
 
-        Integer distance = locals.get(expr);
-        if (distance != null) {
-            environment.assignAt(distance, expr.name, value);
+        VarLocation location = locals.get(expr);
+        if (location != null) {
+            environment.assignAt(location.distance, location.slot, value);
         } else {
             globals.assign(expr.name, value);
         }
@@ -244,8 +259,10 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         }
     }
 
-    void resolve(Expr expr, int depth) {
-        locals.put(expr, depth);
+    // Ch11 Q4: records where the Resolver placed a variable reference —
+    // 'distance' scopes up, at array index 'slot' within that scope.
+    void resolve(Expr expr, int distance, int slot) {
+        locals.put(expr, new VarLocation(distance, slot));
     }
 
     void interpret(List<Stmt> statements) {
@@ -296,12 +313,27 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitVarStmt(Stmt.Var stmt) {
+        // Ch11 Q4: the global environment still stores by name; every other
+        // (local) environment appends to its slot array instead. This
+        // mirrors the Resolver: it only assigns a slot when scopes is
+        // non-empty, i.e. exactly when we're not sitting in globals here.
+        boolean isLocal = environment != globals;
+
         // Ch8 Challenge 2: no initializer leaves the variable uninitialized
         // instead of implicitly defaulting it to nil.
         if (stmt.initializer == null) {
-            environment.defineUninitialized(stmt.name.lexeme);
+            if (isLocal) {
+                environment.defineUninitializedLocal();
+            } else {
+                environment.defineUninitialized(stmt.name.lexeme);
+            }
         } else {
-            environment.define(stmt.name.lexeme, evaluate(stmt.initializer));
+            Object value = evaluate(stmt.initializer);
+            if (isLocal) {
+                environment.defineLocal(value);
+            } else {
+                environment.define(stmt.name.lexeme, value);
+            }
         }
 
         return null;
@@ -340,7 +372,16 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     @Override
     public Void visitFunctionStmt(Stmt.Function stmt) {
         LoxFunction function = new LoxFunction(stmt, environment);
-        environment.define(stmt.name.lexeme, function);
+
+        // Ch11 Q4: same global-vs-local split as visitVarStmt — a locally
+        // declared function (e.g. nested inside another function or a
+        // block) is just another slot in the enclosing local scope.
+        if (environment != globals) {
+            environment.defineLocal(function);
+        } else {
+            environment.define(stmt.name.lexeme, function);
+        }
+
         return null;
     }
 
