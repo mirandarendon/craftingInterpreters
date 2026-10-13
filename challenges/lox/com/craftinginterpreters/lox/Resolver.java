@@ -177,6 +177,21 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
       resolveFunction(method.params, method.body, declaration);
     }
 
+    // Ch12 Challenge 1: static methods are resolved in this same 'this'
+    // scope too — when called (via metaclass dispatch), 'this' is bound
+    // to the class object itself, not an instance, but it's legal either
+    // way. A static method can never be an initializer.
+    for (Stmt.Function method : stmt.staticMethods) {
+      resolveFunction(method.params, method.body, FunctionType.METHOD);
+    }
+
+    // Ch12 Challenge 2: getters resolve exactly like methods (their
+    // params list is just always empty) and likewise can't be the
+    // initializer.
+    for (Stmt.Function getter : stmt.getters) {
+      resolveFunction(getter.params, getter.body, FunctionType.METHOD);
+    }
+
     endScope();
 
     currentClass = enclosingClass;

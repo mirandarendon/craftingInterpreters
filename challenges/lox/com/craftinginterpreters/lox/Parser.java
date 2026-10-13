@@ -68,13 +68,38 @@ class Parser {
         consume(LEFT_BRACE, "Expect '{' before class body.");
 
         List<Stmt.Function> methods = new ArrayList<>();
+        // Ch12 Challenge 1: methods prefixed with 'class' hang off the
+        // class object itself instead of instances.
+        List<Stmt.Function> staticMethods = new ArrayList<>();
+        // Ch12 Challenge 2: getters — 'name { body }' with no parameter
+        // list at all, not even empty parens. Only supported for regular
+        // (non-static) members, matching the challenge's own example.
+        List<Stmt.Function> getters = new ArrayList<>();
         while (!check(RIGHT_BRACE) && !isAtEnd()) {
-            methods.add(function("method"));
+            if (match(CLASS)) {
+                staticMethods.add(function("static method"));
+            } else if (checkNext(LEFT_BRACE)) {
+                // The token after the name is '{' rather than '(', so
+                // there's no parameter list — it's a getter.
+                getters.add(getter());
+            } else {
+                methods.add(function("method"));
+            }
         }
 
         consume(RIGHT_BRACE, "Expect '}' after class body.");
 
-        return new Stmt.Class(name, methods);
+        return new Stmt.Class(name, methods, staticMethods, getters);
+    }
+
+    // Ch12 Challenge 2: a getter has a name and a body but no parameter
+    // list — its body runs every time the property is read, not when it's
+    // explicitly called.
+    private Stmt.Function getter() {
+        Token name = consume(IDENTIFIER, "Expect getter name.");
+        consume(LEFT_BRACE, "Expect '{' before getter body.");
+        List<Stmt> body = block();
+        return new Stmt.Function(name, new ArrayList<>(), body);
     }
 
     private Stmt.Function function(String kind) {

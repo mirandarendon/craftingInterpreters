@@ -401,6 +401,20 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             environment.define(stmt.name.lexeme, null);
         }
 
+        // Ch12 Challenge 1: static ('class'-prefixed) methods live on a
+        // metaclass instead of the class's own instance-method map, so
+        // they're reachable via '.' on the class object itself but never
+        // show up on regular instances.
+        Map<String, LoxFunction> staticMethods = new HashMap<>();
+        for (Stmt.Function method : stmt.staticMethods) {
+            LoxFunction function = new LoxFunction(method, environment, false);
+            staticMethods.put(method.name.lexeme, function);
+        }
+        // Ch12 Challenge 2: static getters aren't supported, so the
+        // metaclass always gets an empty getters map.
+        LoxClass metaclass = new LoxClass(null,
+            stmt.name.lexeme + " metaclass", staticMethods, new HashMap<>());
+
         Map<String, LoxFunction> methods = new HashMap<>();
         for (Stmt.Function method : stmt.methods) {
             LoxFunction function = new LoxFunction(method, environment,
@@ -408,7 +422,15 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             methods.put(method.name.lexeme, function);
         }
 
-        LoxClass klass = new LoxClass(stmt.name.lexeme, methods);
+        // Ch12 Challenge 2: getters, invoked automatically on '.' access
+        // instead of needing to be called.
+        Map<String, LoxFunction> getters = new HashMap<>();
+        for (Stmt.Function getter : stmt.getters) {
+            LoxFunction function = new LoxFunction(getter, environment, false);
+            getters.put(getter.name.lexeme, function);
+        }
+
+        LoxClass klass = new LoxClass(metaclass, stmt.name.lexeme, methods, getters);
 
         if (isLocal) {
             environment.assignAt(0, slot, klass);
@@ -423,7 +445,9 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     public Object visitGetExpr(Expr.Get expr) {
         Object object = evaluate(expr.object);
         if (object instanceof LoxInstance) {
-            return ((LoxInstance)object).get(expr.name);
+            // Ch12 Challenge 2: get() needs the interpreter to actually
+            // invoke a matching getter, not just find it.
+            return ((LoxInstance)object).get(expr.name, this);
         }
 
         throw new RuntimeError(expr.name, "Only instances have properties.");

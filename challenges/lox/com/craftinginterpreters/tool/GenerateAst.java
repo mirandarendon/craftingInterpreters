@@ -40,7 +40,11 @@ public class GenerateAst {
       // nearest enclosing loop at runtime.
       "Break      :",
       // Ch12: class declaration — a name plus its methods.
-      "Class      : Token name, List<Stmt.Function> methods",
+      // Ch12 Challenge 1: 'class' before a method marks it static, so it
+      // hangs off the class object itself rather than instances.
+      // Ch12 Challenge 2: a getter ('name { body }', no parameter list)
+      // runs on every '.' access instead of needing to be called.
+      "Class      : Token name, List<Stmt.Function> methods, List<Stmt.Function> staticMethods, List<Stmt.Function> getters",
       "Expression : Expr expression",
       "Function   : Token name, List<Token> params, List<Stmt> body",
       "If         : Expr condition, Stmt thenBranch, Stmt elseBranch",
