@@ -40,6 +40,9 @@ class Parser {
 
     private Stmt declaration() {
         try {
+            // Ch12: class declaration.
+            if (match(CLASS)) return classDeclaration();
+
             // Ch10 Challenge 2: 'fun' only starts a named declaration when
             // it's immediately followed by a name. 'fun (a) {...}' with no
             // name (whether standalone, as in 'fun () {};', or passed as
@@ -58,16 +61,34 @@ class Parser {
         }
     }
 
+    // Ch12: 'class Name { method() {...} ... }'. Methods reuse function()
+    // but are declared with no leading 'fun' keyword.
+    private Stmt classDeclaration() {
+        Token name = consume(IDENTIFIER, "Expect class name.");
+        consume(LEFT_BRACE, "Expect '{' before class body.");
+
+        List<Stmt.Function> methods = new ArrayList<>();
+        while (!check(RIGHT_BRACE) && !isAtEnd()) {
+            methods.add(function("method"));
+        }
+
+        consume(RIGHT_BRACE, "Expect '}' after class body.");
+
+        return new Stmt.Class(name, methods);
+    }
+
     private Stmt.Function function(String kind) {
         Token name = consume(IDENTIFIER, "Expect " + kind + " name.");
         Expr.Function body = functionBody(kind);
         return new Stmt.Function(name, body.params, body.body);
     }
 
-    // Ch10 Challenge 2: the "(params) { body }" portion is shared by named
-    // function declarations and anonymous function expressions.
+    // Ch10 Challenge 2 + Ch12: the "(params) { body }" portion is shared by
+    // named function declarations, anonymous function expressions, and
+    // (ch12) class methods — methods have no 'fun' keyword at all, so the
+    // error message below is keyed off 'kind' rather than hardcoding it.
     private Expr.Function functionBody(String kind) {
-        consume(LEFT_PAREN, "Expect '(' after 'fun'.");
+        consume(LEFT_PAREN, "Expect '(' after " + kind + " name.");
         List<Token> parameters = new ArrayList<>();
         if (!check(RIGHT_PAREN)) {
             do {
@@ -269,6 +290,10 @@ class Parser {
             if (expr instanceof Expr.Variable) {
                 Token name = ((Expr.Variable)expr).name;
                 return new Expr.Assign(name, value);
+            } else if (expr instanceof Expr.Get) {
+                // Ch12: 'object.field = value'.
+                Expr.Get get = (Expr.Get)expr;
+                return new Expr.Set(get.object, get.name, value);
             }
 
             error(equals, "Invalid assignment target.");
@@ -381,6 +406,11 @@ class Parser {
         while (true) {
             if (match(LEFT_PAREN)) {
                 expr = finishCall(expr);
+            } else if (match(DOT)) {
+                // Ch12: property access, chainable like calls (e.g.
+                // 'a.b.c()').
+                Token name = consume(IDENTIFIER, "Expect property name after '.'.");
+                expr = new Expr.Get(expr, name);
             } else {
                 break;
             }
@@ -417,6 +447,9 @@ class Parser {
         if (match(NUMBER, STRING)) {
         return new Expr.Literal(previous().literal);
         }
+
+        // Ch12: 'this' inside a method body.
+        if (match(THIS)) return new Expr.This(previous());
 
         if (match(IDENTIFIER)) {
         return new Expr.Variable(previous());

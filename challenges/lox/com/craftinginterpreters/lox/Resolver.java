@@ -8,7 +8,17 @@ import java.util.Stack;
 class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   private enum FunctionType {
     NONE,
-    FUNCTION
+    FUNCTION,
+    // Ch12: a class method, and specifically its 'init' method.
+    METHOD,
+    INITIALIZER
+  }
+
+  // Ch12: tracks whether we're currently resolving inside a class body, so
+  // 'this' can be rejected outside of one.
+  private enum ClassType {
+    NONE,
+    CLASS
   }
 
   // Ch11 Q3 + Q4: everything the resolver tracks about one local variable
@@ -30,6 +40,7 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   private final Interpreter interpreter;
   private final Stack<Map<String, VariableInfo>> scopes = new Stack<>();
   private FunctionType currentFunction = FunctionType.NONE;
+  private ClassType currentClass = ClassType.NONE;
 
   Resolver(Interpreter interpreter) {
     this.interpreter = interpreter;
@@ -132,6 +143,46 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 
+  // Ch12: class declaration — the class name is a normal resolvable local
+  // (or an untracked global), but its methods are looked up dynamically
+  // at runtime (LoxClass.findMethod), not through declare()/define(), so
+  // only their *bodies* need resolving.
+  @Override
+  public Void visitClassStmt(Stmt.Class stmt) {
+    ClassType enclosingClass = currentClass;
+    currentClass = ClassType.CLASS;
+
+    declare(stmt.name);
+    define(stmt.name);
+
+    beginScope();
+    // Ch11 Q4: 'this' goes through the normal declare/define path so it
+    // gets a real slot (always 0, since it's the only thing declared in
+    // this scope) — matching LoxFunction.bind(), which appends 'this' as
+    // the first (only) local in the environment it creates.
+    Token thisToken = new Token(TokenType.THIS, "this", null, stmt.name.line);
+    declare(thisToken);
+    define(thisToken);
+    // Ch11 Q3: 'this' is an implicit binding, not a variable the user
+    // wrote — never flag it as "never used" even if no method in this
+    // class happens to reference it.
+    scopes.peek().get("this").used = true;
+
+    for (Stmt.Function method : stmt.methods) {
+      FunctionType declaration = FunctionType.METHOD;
+      if (method.name.lexeme.equals("init")) {
+        declaration = FunctionType.INITIALIZER;
+      }
+
+      resolveFunction(method.params, method.body, declaration);
+    }
+
+    endScope();
+
+    currentClass = enclosingClass;
+    return null;
+  }
+
   @Override
   public Void visitExpressionStmt(Stmt.Expression stmt) {
     resolve(stmt.expression);
@@ -168,6 +219,12 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
     if (stmt.value != null) {
+      // Ch12: 'init' always implicitly returns 'this'; returning a
+      // different value from it is a resolution error.
+      if (currentFunction == FunctionType.INITIALIZER) {
+        Lox.error(stmt.keyword, "Can't return a value from an initializer.");
+      }
+
       resolve(stmt.value);
     }
 
@@ -221,6 +278,33 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   @Override
   public Void visitFunctionExpr(Expr.Function expr) {
     resolveFunction(expr.params, expr.body, FunctionType.FUNCTION);
+    return null;
+  }
+
+  // Ch12: property access/assignment names are resolved dynamically at
+  // runtime, so only the object (and for Set, the value) expression needs
+  // resolving here.
+  @Override
+  public Void visitGetExpr(Expr.Get expr) {
+    resolve(expr.object);
+    return null;
+  }
+
+  @Override
+  public Void visitSetExpr(Expr.Set expr) {
+    resolve(expr.value);
+    resolve(expr.object);
+    return null;
+  }
+
+  @Override
+  public Void visitThisExpr(Expr.This expr) {
+    if (currentClass == ClassType.NONE) {
+      Lox.error(expr.keyword, "Can't use 'this' outside of a class.");
+      return null;
+    }
+
+    resolveLocal(expr, expr.keyword);
     return null;
   }
 

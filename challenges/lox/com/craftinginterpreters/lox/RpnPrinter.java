@@ -69,6 +69,23 @@ class RpnPrinter implements Expr.Visitor<String> {
     return "<fn>";
   }
 
+  // Ch12: property access/assignment and 'this'.
+  @Override
+  public String visitGetExpr(Expr.Get expr) {
+    return expr.object.accept(this) + " ." + expr.name.lexeme;
+  }
+
+  @Override
+  public String visitSetExpr(Expr.Set expr) {
+    return expr.object.accept(this) + " " + expr.value.accept(this) +
+        " =." + expr.name.lexeme;
+  }
+
+  @Override
+  public String visitThisExpr(Expr.This expr) {
+    return "this";
+  }
+
   public static void main(String[] args) {
     // (1 + 2) * (4 - 3)
     Expr expression = new Expr.Binary(

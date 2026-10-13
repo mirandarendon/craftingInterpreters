@@ -112,7 +112,7 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     // null, which LoxFunction.toString() accounts for.
     @Override
     public Object visitFunctionExpr(Expr.Function expr) {
-        return new LoxFunction(new Stmt.Function(null, expr.params, expr.body), environment);
+        return new LoxFunction(new Stmt.Function(null, expr.params, expr.body), environment, false);
     }
 
     @Override
@@ -371,7 +371,7 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitFunctionStmt(Stmt.Function stmt) {
-        LoxFunction function = new LoxFunction(stmt, environment);
+        LoxFunction function = new LoxFunction(stmt, environment, false);
 
         // Ch11 Q4: same global-vs-local split as visitVarStmt — a locally
         // declared function (e.g. nested inside another function or a
@@ -383,6 +383,68 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         }
 
         return null;
+    }
+
+    @Override
+    public Void visitClassStmt(Stmt.Class stmt) {
+        // Ch11 Q4: the class name is bound as a placeholder (null) first,
+        // *before* building its methods, so a method body that mentions
+        // the class by name (e.g. a factory method) captures an
+        // environment where that binding already exists; we only need to
+        // remember exactly where it landed (global map vs. local slot) so
+        // we can overwrite it with the real LoxClass afterward.
+        boolean isLocal = environment != globals;
+        int slot = -1;
+        if (isLocal) {
+            slot = environment.defineLocal(null);
+        } else {
+            environment.define(stmt.name.lexeme, null);
+        }
+
+        Map<String, LoxFunction> methods = new HashMap<>();
+        for (Stmt.Function method : stmt.methods) {
+            LoxFunction function = new LoxFunction(method, environment,
+                method.name.lexeme.equals("init"));
+            methods.put(method.name.lexeme, function);
+        }
+
+        LoxClass klass = new LoxClass(stmt.name.lexeme, methods);
+
+        if (isLocal) {
+            environment.assignAt(0, slot, klass);
+        } else {
+            environment.assign(stmt.name, klass);
+        }
+
+        return null;
+    }
+
+    @Override
+    public Object visitGetExpr(Expr.Get expr) {
+        Object object = evaluate(expr.object);
+        if (object instanceof LoxInstance) {
+            return ((LoxInstance)object).get(expr.name);
+        }
+
+        throw new RuntimeError(expr.name, "Only instances have properties.");
+    }
+
+    @Override
+    public Object visitSetExpr(Expr.Set expr) {
+        Object object = evaluate(expr.object);
+
+        if (!(object instanceof LoxInstance)) {
+            throw new RuntimeError(expr.name, "Only instances have fields.");
+        }
+
+        Object value = evaluate(expr.value);
+        ((LoxInstance)object).set(expr.name, value);
+        return value;
+    }
+
+    @Override
+    public Object visitThisExpr(Expr.This expr) {
+        return lookUpVariable(expr.keyword, expr);
     }
 
     @Override

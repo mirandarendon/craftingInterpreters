@@ -16,14 +16,20 @@ public class GenerateAst {
       "Assign   : Token name, Expr value",
       "Binary   : Expr left, Token operator, Expr right",
       "Call     : Expr callee, Token paren, List<Expr> arguments",
+      // Ch12: property access, e.g. 'instance.field'.
+      "Get      : Expr object, Token name",
       "Grouping : Expr expression",
       "Literal  : Object value",
       "Logical  : Expr left, Token operator, Expr right",
       // Ch10 Challenge 2: anonymous function expression, e.g.
       // 'fun (a) { print a; }' used as a value rather than a declaration.
       "Function : List<Token> params, List<Stmt> body",
+      // Ch12: property assignment, e.g. 'instance.field = value'.
+      "Set      : Expr object, Token name, Expr value",
       // Ch6 Challenge 2: AST node for the ternary operator ?:.
       "Ternary  : Expr condition, Expr thenBranch, Expr elseBranch",
+      // Ch12: 'this' inside a method body.
+      "This     : Token keyword",
       "Unary    : Token operator, Expr right",
       "Variable : Token name"
     ));
@@ -33,6 +39,8 @@ public class GenerateAst {
       // Ch9 Challenge 3: 'break' has no fields; it just unwinds to the
       // nearest enclosing loop at runtime.
       "Break      :",
+      // Ch12: class declaration — a name plus its methods.
+      "Class      : Token name, List<Stmt.Function> methods",
       "Expression : Expr expression",
       "Function   : Token name, List<Token> params, List<Stmt> body",
       "If         : Expr condition, Stmt thenBranch, Stmt elseBranch",

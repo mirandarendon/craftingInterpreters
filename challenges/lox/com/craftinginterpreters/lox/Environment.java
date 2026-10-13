@@ -83,9 +83,12 @@ class Environment {
   }
 
   // Ch11 Q4: append the next local in this scope's slot array, in
-  // declaration order.
-  void defineLocal(Object value) {
+  // declaration order. Returns the slot it landed at — Ch12's class
+  // declaration needs this to come back and overwrite a placeholder
+  // value once the real LoxClass exists (see Interpreter.visitClassStmt).
+  int defineLocal(Object value) {
     slots.add(value);
+    return slots.size() - 1;
   }
 
   // Ch11 Q4 + Ch8 Challenge 2: same as defineLocal, but for a local 'var'
@@ -111,6 +114,14 @@ class Environment {
 
   void assignAt(int distance, int slot, Object value) {
     ancestor(distance).slots.set(slot, value);
+  }
+
+  // Ch12: plain slot access with no Ch8 Challenge 2 uninitialized check,
+  // used only by LoxFunction to retrieve a method's already-bound 'this'
+  // — it's never user-declared and never the sentinel, so that check
+  // doesn't apply and there's no Token handy to report it with anyway.
+  Object getSlotAt(int distance, int slot) {
+    return ancestor(distance).slots.get(slot);
   }
 
   Environment ancestor(int distance) {
