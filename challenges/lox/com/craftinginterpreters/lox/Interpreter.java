@@ -387,6 +387,18 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
     @Override
     public Void visitClassStmt(Stmt.Class stmt) {
+        // Ch13: evaluate and validate the superclass before touching the
+        // environment for this class's own binding at all.
+        Object superclassValue = null;
+        if (stmt.superclass != null) {
+            superclassValue = evaluate(stmt.superclass);
+            if (!(superclassValue instanceof LoxClass)) {
+                throw new RuntimeError(stmt.superclass.name,
+                    "Superclass must be a class.");
+            }
+        }
+        LoxClass superclass = (LoxClass)superclassValue;
+
         // Ch11 Q4: the class name is bound as a placeholder (null) first,
         // *before* building its methods, so a method body that mentions
         // the class by name (e.g. a factory method) captures an
@@ -401,10 +413,25 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             environment.define(stmt.name.lexeme, null);
         }
 
+        // Ch13: if there's a superclass, every method's closure needs to
+        // see 'super' bound to it, so open a scope for that now and build
+        // methods/getters against *this* environment instead. Ch11 Q4:
+        // 'super' goes through the same slot-array path as 'this' always
+        // has — it's the only (first) local defined here, so it's always
+        // slot 0, which visitSuperExpr below relies on implicitly via the
+        // Resolver's matching assumption.
+        Environment enclosingEnvironment = environment;
+        if (stmt.superclass != null) {
+            environment = new Environment(environment);
+            environment.defineLocal(superclass);
+        }
+
         // Ch12 Challenge 1: static ('class'-prefixed) methods live on a
         // metaclass instead of the class's own instance-method map, so
         // they're reachable via '.' on the class object itself but never
-        // show up on regular instances.
+        // show up on regular instances. Ch13: metaclasses are deliberately
+        // not chained to a superclass's metaclass — static methods aren't
+        // inherited, only instance methods/getters are.
         Map<String, LoxFunction> staticMethods = new HashMap<>();
         for (Stmt.Function method : stmt.staticMethods) {
             LoxFunction function = new LoxFunction(method, environment, false);
@@ -412,7 +439,7 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         }
         // Ch12 Challenge 2: static getters aren't supported, so the
         // metaclass always gets an empty getters map.
-        LoxClass metaclass = new LoxClass(null,
+        LoxClass metaclass = new LoxClass(null, null,
             stmt.name.lexeme + " metaclass", staticMethods, new HashMap<>());
 
         Map<String, LoxFunction> methods = new HashMap<>();
@@ -430,7 +457,12 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             getters.put(getter.name.lexeme, function);
         }
 
-        LoxClass klass = new LoxClass(metaclass, stmt.name.lexeme, methods, getters);
+        LoxClass klass = new LoxClass(metaclass, superclass,
+            stmt.name.lexeme, methods, getters);
+
+        if (stmt.superclass != null) {
+            environment = enclosingEnvironment;
+        }
 
         if (isLocal) {
             environment.assignAt(0, slot, klass);
@@ -469,6 +501,31 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
     @Override
     public Object visitThisExpr(Expr.This expr) {
         return lookUpVariable(expr.keyword, expr);
+    }
+
+    @Override
+    public Object visitSuperExpr(Expr.Super expr) {
+        // Ch11 Q4: resolved exactly like any other local — 'super' always
+        // lives at slot 0 of its own scope (see visitClassStmt above).
+        VarLocation location = locals.get(expr);
+        LoxClass superclass = (LoxClass)environment.getSlotAt(
+            location.distance, location.slot);
+
+        // 'this' lives one scope closer than 'super' — the bind()-created
+        // environment holding 'this' is nested directly inside the
+        // class-declaration-created environment holding 'super' — always
+        // at slot 0 there too.
+        LoxInstance object = (LoxInstance)environment.getSlotAt(
+            location.distance - 1, 0);
+
+        LoxFunction method = superclass.findMethod(expr.method.lexeme);
+
+        if (method == null) {
+            throw new RuntimeError(expr.method,
+                "Undefined property '" + expr.method.lexeme + "'.");
+        }
+
+        return method.bind(object);
     }
 
     @Override

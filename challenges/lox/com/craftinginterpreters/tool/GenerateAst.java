@@ -28,6 +28,8 @@ public class GenerateAst {
       "Set      : Expr object, Token name, Expr value",
       // Ch6 Challenge 2: AST node for the ternary operator ?:.
       "Ternary  : Expr condition, Expr thenBranch, Expr elseBranch",
+      // Ch13: 'super.method' inside a subclass method body.
+      "Super    : Token keyword, Token method",
       // Ch12: 'this' inside a method body.
       "This     : Token keyword",
       "Unary    : Token operator, Expr right",
@@ -44,7 +46,8 @@ public class GenerateAst {
       // hangs off the class object itself rather than instances.
       // Ch12 Challenge 2: a getter ('name { body }', no parameter list)
       // runs on every '.' access instead of needing to be called.
-      "Class      : Token name, List<Stmt.Function> methods, List<Stmt.Function> staticMethods, List<Stmt.Function> getters",
+      // Ch13: an optional superclass ('class B < A { ... }').
+      "Class      : Token name, Expr.Variable superclass, List<Stmt.Function> methods, List<Stmt.Function> staticMethods, List<Stmt.Function> getters",
       "Expression : Expr expression",
       "Function   : Token name, List<Token> params, List<Stmt> body",
       "If         : Expr condition, Stmt thenBranch, Stmt elseBranch",

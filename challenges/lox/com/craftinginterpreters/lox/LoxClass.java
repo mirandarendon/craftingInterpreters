@@ -11,6 +11,12 @@ import java.util.Map;
 // metaclass) the same way it already does for ordinary instances.
 class LoxClass extends LoxInstance implements LoxCallable {
   final String name;
+  // Ch13: the superclass whose instance members (methods/getters) this
+  // class falls back to. Note this is deliberately *not* threaded through
+  // to the metaclass below — chapter 13 only covers instance-member
+  // inheritance, so a subclass's static ('class'-prefixed, Ch12
+  // Challenge 1) methods are not inherited from the superclass's statics.
+  final LoxClass superclass;
   private final Map<String, LoxFunction> methods;
   // Ch12 Challenge 2: getters, kept separate from regular methods since
   // they're invoked automatically on property access rather than called.
@@ -18,9 +24,10 @@ class LoxClass extends LoxInstance implements LoxCallable {
   // metaclass never has any of these.)
   private final Map<String, LoxFunction> getters;
 
-  LoxClass(LoxClass metaclass, String name, Map<String, LoxFunction> methods,
-           Map<String, LoxFunction> getters) {
+  LoxClass(LoxClass metaclass, LoxClass superclass, String name,
+           Map<String, LoxFunction> methods, Map<String, LoxFunction> getters) {
     super(metaclass);
+    this.superclass = superclass;
     this.name = name;
     this.methods = methods;
     this.getters = getters;
@@ -31,12 +38,20 @@ class LoxClass extends LoxInstance implements LoxCallable {
       return methods.get(name);
     }
 
+    if (superclass != null) {
+      return superclass.findMethod(name);
+    }
+
     return null;
   }
 
   LoxFunction findGetter(String name) {
     if (getters.containsKey(name)) {
       return getters.get(name);
+    }
+
+    if (superclass != null) {
+      return superclass.findGetter(name);
     }
 
     return null;

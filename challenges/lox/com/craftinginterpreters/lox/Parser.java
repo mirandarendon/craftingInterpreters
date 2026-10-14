@@ -65,6 +65,14 @@ class Parser {
     // but are declared with no leading 'fun' keyword.
     private Stmt classDeclaration() {
         Token name = consume(IDENTIFIER, "Expect class name.");
+
+        // Ch13: optional superclass, e.g. 'class BostonCream < Doughnut'.
+        Expr.Variable superclass = null;
+        if (match(LESS)) {
+            consume(IDENTIFIER, "Expect superclass name.");
+            superclass = new Expr.Variable(previous());
+        }
+
         consume(LEFT_BRACE, "Expect '{' before class body.");
 
         List<Stmt.Function> methods = new ArrayList<>();
@@ -89,7 +97,7 @@ class Parser {
 
         consume(RIGHT_BRACE, "Expect '}' after class body.");
 
-        return new Stmt.Class(name, methods, staticMethods, getters);
+        return new Stmt.Class(name, superclass, methods, staticMethods, getters);
     }
 
     // Ch12 Challenge 2: a getter has a name and a body but no parameter
@@ -471,6 +479,14 @@ class Parser {
 
         if (match(NUMBER, STRING)) {
         return new Expr.Literal(previous().literal);
+        }
+
+        // Ch13: 'super.method' inside a subclass method body.
+        if (match(SUPER)) {
+        Token keyword = previous();
+        consume(DOT, "Expect '.' after 'super'.");
+        Token method = consume(IDENTIFIER, "Expect superclass method name.");
+        return new Expr.Super(keyword, method);
         }
 
         // Ch12: 'this' inside a method body.

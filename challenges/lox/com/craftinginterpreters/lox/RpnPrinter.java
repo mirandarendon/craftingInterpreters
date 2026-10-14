@@ -86,6 +86,11 @@ class RpnPrinter implements Expr.Visitor<String> {
     return "this";
   }
 
+  @Override
+  public String visitSuperExpr(Expr.Super expr) {
+    return "super ." + expr.method.lexeme;
+  }
+
   public static void main(String[] args) {
     // (1 + 2) * (4 - 3)
     Expr expression = new Expr.Binary(
