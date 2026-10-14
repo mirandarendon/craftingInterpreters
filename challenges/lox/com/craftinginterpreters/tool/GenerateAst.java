@@ -19,6 +19,9 @@ public class GenerateAst {
       // Ch12: property access, e.g. 'instance.field'.
       "Get      : Expr object, Token name",
       "Grouping : Expr expression",
+      // Ch13 Challenge 2: BETA-style 'inner()' inside a method body —
+      // replaces 'super' (removed below) under the new dispatch rules.
+      "Inner    : Token keyword",
       "Literal  : Object value",
       "Logical  : Expr left, Token operator, Expr right",
       // Ch10 Challenge 2: anonymous function expression, e.g.
@@ -28,8 +31,6 @@ public class GenerateAst {
       "Set      : Expr object, Token name, Expr value",
       // Ch6 Challenge 2: AST node for the ternary operator ?:.
       "Ternary  : Expr condition, Expr thenBranch, Expr elseBranch",
-      // Ch13: 'super.method' inside a subclass method body.
-      "Super    : Token keyword, Token method",
       // Ch12: 'this' inside a method body.
       "This     : Token keyword",
       "Unary    : Token operator, Expr right",
@@ -53,6 +54,12 @@ public class GenerateAst {
       "If         : Expr condition, Stmt thenBranch, Stmt elseBranch",
       "Print      : Expr expression",
       "Return     : Token keyword, Expr value",
+      // Ch13 Challenge 3: 'throw expr;' raises a catchable runtime error
+      // carrying 'expr' as the value a 'catch (e)' binds to.
+      "Throw      : Token keyword, Expr value",
+      // Ch13 Challenge 3: 'try { ... } catch (e) { ... }' — catchVar is
+      // null for a bare 'catch { ... }' with no bound variable.
+      "Try        : Stmt tryBlock, Token catchVar, Stmt catchBlock",
       "Var        : Token name, Expr initializer",
       "While      : Expr condition, Stmt body"
     ));

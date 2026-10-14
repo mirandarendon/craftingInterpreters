@@ -15,12 +15,10 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
   }
 
   // Ch12: tracks whether we're currently resolving inside a class body, so
-  // 'this' can be rejected outside of one.
+  // 'this' (and, Ch13 Challenge 2, 'inner') can be rejected outside one.
   private enum ClassType {
     NONE,
-    CLASS,
-    // Ch13: a class with a superclass, so 'super' is legal inside it.
-    SUBCLASS
+    CLASS
   }
 
   // Ch11 Q3 + Q4: everything the resolver tracks about one local variable
@@ -147,8 +145,8 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
 
   // Ch12: class declaration — the class name is a normal resolvable local
   // (or an untracked global), but its methods are looked up dynamically
-  // at runtime (LoxClass.findMethod), not through declare()/define(), so
-  // only their *bodies* need resolving.
+  // at runtime (LoxClass.findMethodChain), not through declare()/define(),
+  // so only their *bodies* need resolving.
   @Override
   public Void visitClassStmt(Stmt.Class stmt) {
     ClassType enclosingClass = currentClass;
@@ -157,34 +155,23 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     declare(stmt.name);
     define(stmt.name);
 
-    // Ch13: a class can't extend itself.
+    // Ch13: a class can't extend itself. (This check is independent of
+    // method-dispatch semantics, so Ch13 Challenge 2 keeps it even though
+    // it removes 'super'.)
     if (stmt.superclass != null &&
         stmt.name.lexeme.equals(stmt.superclass.name.lexeme)) {
       Lox.error(stmt.superclass.name, "A class can't inherit from itself.");
     }
 
     if (stmt.superclass != null) {
-      currentClass = ClassType.SUBCLASS;
       resolve(stmt.superclass);
-    }
-
-    // Ch13: if there's a superclass, 'super' needs its own scope wrapping
-    // the 'this' scope below — Ch11 Q4: declared the same Q3/Q4-aware way
-    // as 'this', so it gets a real (always-0) slot and is exempted from
-    // the "never used" check.
-    if (stmt.superclass != null) {
-      beginScope();
-      Token superToken = new Token(TokenType.SUPER, "super", null, stmt.name.line);
-      declare(superToken);
-      define(superToken);
-      scopes.peek().get("super").used = true;
     }
 
     beginScope();
     // Ch11 Q4: 'this' goes through the normal declare/define path so it
-    // gets a real slot (always 0, since it's the only thing declared in
+    // gets a real slot (always 0, since it's the first thing declared in
     // this scope) — matching LoxFunction.bind(), which appends 'this' as
-    // the first (only) local in the environment it creates.
+    // the first local in the environment it creates.
     Token thisToken = new Token(TokenType.THIS, "this", null, stmt.name.line);
     declare(thisToken);
     define(thisToken);
@@ -192,6 +179,16 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     // wrote — never flag it as "never used" even if no method in this
     // class happens to reference it.
     scopes.peek().get("this").used = true;
+
+    // Ch13 Challenge 2: 'inner' lives in this SAME scope, right after
+    // 'this' (so always slot 1) — every method's bind() call defines both
+    // together now, since all method calls go through the override-chain
+    // machinery (LoxClass.findMethodChain/InnerCallable), whether or not
+    // that particular method is actually overridden anywhere.
+    Token innerToken = new Token(TokenType.INNER, "inner", null, stmt.name.line);
+    declare(innerToken);
+    define(innerToken);
+    scopes.peek().get("inner").used = true;
 
     for (Stmt.Function method : stmt.methods) {
       FunctionType declaration = FunctionType.METHOD;
@@ -218,8 +215,6 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     }
 
     endScope();
-
-    if (stmt.superclass != null) endScope();
 
     currentClass = enclosingClass;
     return null;
@@ -268,6 +263,38 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
       }
 
       resolve(stmt.value);
+    }
+
+    return null;
+  }
+
+  // Ch13 Challenge 3: 'throw expr;' just needs its value expression
+  // resolved — it's a statement, not a bindable name.
+  @Override
+  public Void visitThrowStmt(Stmt.Throw stmt) {
+    resolve(stmt.value);
+    return null;
+  }
+
+  // Ch13 Challenge 3: the try block resolves in the current scope; if
+  // there's a catch variable, it gets its OWN scope (Q3/Q4-aware, like
+  // 'this'/'inner'/function params) wrapping the catch block, which then
+  // opens its own nested scope as any Stmt.Block normally does.
+  @Override
+  public Void visitTryStmt(Stmt.Try stmt) {
+    resolve(stmt.tryBlock);
+
+    if (stmt.catchVar != null) {
+      // One shared scope for the catch variable AND the catch block's own
+      // statements — same pattern resolveFunction() uses for params+body
+      // — rather than nesting an extra scope via visitBlockStmt.
+      beginScope();
+      declare(stmt.catchVar);
+      define(stmt.catchVar);
+      resolve(((Stmt.Block)stmt.catchBlock).statements);
+      endScope();
+    } else {
+      resolve(stmt.catchBlock);
     }
 
     return null;
@@ -350,13 +377,16 @@ class Resolver implements Expr.Visitor<Void>, Stmt.Visitor<Void> {
     return null;
   }
 
+  // Ch13 Challenge 2: 'inner' resolves exactly like 'this' — same scope,
+  // same "must be inside a class" rule. Unlike the old 'super', there's
+  // no additional "must have a superclass" restriction: 'inner' is legal
+  // in any method, and simply does nothing at runtime if nothing further
+  // down the hierarchy overrides it.
   @Override
-  public Void visitSuperExpr(Expr.Super expr) {
+  public Void visitInnerExpr(Expr.Inner expr) {
     if (currentClass == ClassType.NONE) {
-      Lox.error(expr.keyword, "Can't use 'super' outside of a class.");
-    } else if (currentClass != ClassType.SUBCLASS) {
-      Lox.error(expr.keyword,
-          "Can't use 'super' in a class with no superclass.");
+      Lox.error(expr.keyword, "Can't use 'inner' outside of a class.");
+      return null;
     }
 
     resolveLocal(expr, expr.keyword);

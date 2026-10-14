@@ -9,12 +9,12 @@ abstract class Expr {
     R visitCallExpr(Call expr);
     R visitGetExpr(Get expr);
     R visitGroupingExpr(Grouping expr);
+    R visitInnerExpr(Inner expr);
     R visitLiteralExpr(Literal expr);
     R visitLogicalExpr(Logical expr);
     R visitFunctionExpr(Function expr);
     R visitSetExpr(Set expr);
     R visitTernaryExpr(Ternary expr);
-    R visitSuperExpr(Super expr);
     R visitThisExpr(This expr);
     R visitUnaryExpr(Unary expr);
     R visitVariableExpr(Variable expr);
@@ -91,6 +91,18 @@ abstract class Expr {
 
     final Expr expression;
   }
+  static class Inner extends Expr {
+    Inner(Token keyword) {
+      this.keyword = keyword;
+    }
+
+    @Override
+    <R> R accept(Visitor<R> visitor) {
+      return visitor.visitInnerExpr(this);
+    }
+
+    final Token keyword;
+  }
   static class Literal extends Expr {
     Literal(Object value) {
       this.value = value;
@@ -164,20 +176,6 @@ abstract class Expr {
     final Expr condition;
     final Expr thenBranch;
     final Expr elseBranch;
-  }
-  static class Super extends Expr {
-    Super(Token keyword, Token method) {
-      this.keyword = keyword;
-      this.method = method;
-    }
-
-    @Override
-    <R> R accept(Visitor<R> visitor) {
-      return visitor.visitSuperExpr(this);
-    }
-
-    final Token keyword;
-    final Token method;
   }
   static class This extends Expr {
     This(Token keyword) {

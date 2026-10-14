@@ -15,19 +15,26 @@ class Scanner {
     keywords.put("and",    AND);
     // Ch9 Challenge 3: break statement
     keywords.put("break",  BREAK);
+    // Ch13 Challenge 3: try/catch/throw
+    keywords.put("catch",  CATCH);
     keywords.put("class",  CLASS);
     keywords.put("else",   ELSE);
     keywords.put("false",  FALSE);
     keywords.put("for",    FOR);
     keywords.put("fun",    FUN);
     keywords.put("if",     IF);
+    // Ch13 Challenge 2: BETA-style 'inner'
+    keywords.put("inner",  INNER);
     keywords.put("nil",    NIL);
     keywords.put("or",     OR);
     keywords.put("print",  PRINT);
     keywords.put("return", RETURN);
     keywords.put("super",  SUPER);
     keywords.put("this",   THIS);
+    // Ch13 Challenge 3: try/catch/throw
+    keywords.put("throw",  THROW);
     keywords.put("true",   TRUE);
+    keywords.put("try",    TRY);
     keywords.put("var",    VAR);
     keywords.put("while",  WHILE);
   }

@@ -413,18 +413,13 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
             environment.define(stmt.name.lexeme, null);
         }
 
-        // Ch13: if there's a superclass, every method's closure needs to
-        // see 'super' bound to it, so open a scope for that now and build
-        // methods/getters against *this* environment instead. Ch11 Q4:
-        // 'super' goes through the same slot-array path as 'this' always
-        // has — it's the only (first) local defined here, so it's always
-        // slot 0, which visitSuperExpr below relies on implicitly via the
-        // Resolver's matching assumption.
-        Environment enclosingEnvironment = environment;
-        if (stmt.superclass != null) {
-            environment = new Environment(environment);
-            environment.defineLocal(superclass);
-        }
+        // Ch13 Challenge 2: unlike the book's 'super', BETA semantics
+        // don't need method closures to see anything extra bound for
+        // inheritance — 'this' and 'inner' are both supplied later, per
+        // call, by LoxFunction.bind() (see LoxInstance.get() and
+        // LoxClass.call()). So method/getter closures just close over the
+        // ordinary enclosing environment, same as a class with no
+        // superclass at all.
 
         // Ch12 Challenge 1: static ('class'-prefixed) methods live on a
         // metaclass instead of the class's own instance-method map, so
@@ -459,10 +454,6 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
 
         LoxClass klass = new LoxClass(metaclass, superclass,
             stmt.name.lexeme, methods, getters);
-
-        if (stmt.superclass != null) {
-            environment = enclosingEnvironment;
-        }
 
         if (isLocal) {
             environment.assignAt(0, slot, klass);
@@ -503,29 +494,14 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         return lookUpVariable(expr.keyword, expr);
     }
 
+    // Ch13 Challenge 2: 'inner' resolves exactly like 'this' — it's just
+    // another local the Resolver placed, retrieved the normal way. Its
+    // value (an InnerCallable, or whatever was bound) is already fully
+    // set up by LoxFunction.bind(); there's no extra lookup logic needed
+    // here the way the old 'super' required.
     @Override
-    public Object visitSuperExpr(Expr.Super expr) {
-        // Ch11 Q4: resolved exactly like any other local — 'super' always
-        // lives at slot 0 of its own scope (see visitClassStmt above).
-        VarLocation location = locals.get(expr);
-        LoxClass superclass = (LoxClass)environment.getSlotAt(
-            location.distance, location.slot);
-
-        // 'this' lives one scope closer than 'super' — the bind()-created
-        // environment holding 'this' is nested directly inside the
-        // class-declaration-created environment holding 'super' — always
-        // at slot 0 there too.
-        LoxInstance object = (LoxInstance)environment.getSlotAt(
-            location.distance - 1, 0);
-
-        LoxFunction method = superclass.findMethod(expr.method.lexeme);
-
-        if (method == null) {
-            throw new RuntimeError(expr.method,
-                "Undefined property '" + expr.method.lexeme + "'.");
-        }
-
-        return method.bind(object);
+    public Object visitInnerExpr(Expr.Inner expr) {
+        return lookUpVariable(expr.keyword, expr);
     }
 
     @Override
@@ -534,6 +510,38 @@ class Interpreter implements Expr.Visitor<Object>, Stmt.Visitor<Void> {
         if (stmt.value != null) value = evaluate(stmt.value);
 
         throw new Return(value);
+    }
+
+    // Ch13 Challenge 3: raises a catchable error carrying the thrown Lox
+    // value. Reuses RuntimeError (the same type every built-in runtime
+    // error already uses), so 'try'/'catch' catches both kinds uniformly
+    // and an uncaught throw is reported through the existing
+    // Lox.runtimeError() path with no extra plumbing.
+    @Override
+    public Void visitThrowStmt(Stmt.Throw stmt) {
+        Object value = evaluate(stmt.value);
+        throw new RuntimeError(stmt.keyword, value, stringify(value));
+    }
+
+    @Override
+    public Void visitTryStmt(Stmt.Try stmt) {
+        try {
+            execute(stmt.tryBlock);
+        } catch (RuntimeError error) {
+            if (stmt.catchVar != null) {
+                // Ch11 Q4: one fresh environment holds both the caught
+                // value and the catch block's own locals, matching the
+                // Resolver's single shared scope for them.
+                Environment catchEnvironment = new Environment(environment);
+                catchEnvironment.defineLocal(error.value);
+                executeBlock(((Stmt.Block)stmt.catchBlock).statements,
+                    catchEnvironment);
+            } else {
+                execute(stmt.catchBlock);
+            }
+        }
+
+        return null;
     }
 
 }

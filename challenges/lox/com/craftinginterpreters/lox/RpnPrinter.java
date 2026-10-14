@@ -86,9 +86,10 @@ class RpnPrinter implements Expr.Visitor<String> {
     return "this";
   }
 
+  // Ch13 Challenge 2: replaces visitSuperExpr.
   @Override
-  public String visitSuperExpr(Expr.Super expr) {
-    return "super ." + expr.method.lexeme;
+  public String visitInnerExpr(Expr.Inner expr) {
+    return "inner";
   }
 
   public static void main(String[] args) {

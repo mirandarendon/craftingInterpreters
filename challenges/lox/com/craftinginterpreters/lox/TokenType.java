@@ -17,8 +17,13 @@ enum TokenType {
 
   // Keywords.
   AND, BREAK, // Ch9 Challenge 3: break statement
-  CLASS, ELSE, FALSE, FUN, FOR, IF, NIL, OR,
-  PRINT, RETURN, SUPER, THIS, TRUE, VAR, WHILE,
+  CATCH, // Ch13 Challenge 3: try/catch/throw error handling
+  CLASS, ELSE, FALSE, FUN, FOR, IF,
+  INNER, // Ch13 Challenge 2: BETA-style 'inner', replacing 'super'
+  NIL, OR,
+  PRINT, RETURN, SUPER, THIS,
+  THROW, TRUE, TRY, // Ch13 Challenge 3
+  VAR, WHILE,
 
   EOF
 }

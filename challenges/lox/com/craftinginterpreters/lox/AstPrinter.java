@@ -80,9 +80,11 @@ class AstPrinter implements Expr.Visitor<String> {
     return "this";
   }
 
+  // Ch13 Challenge 2: replaces visitSuperExpr — 'inner' takes no
+  // arguments and carries no target method name to print.
   @Override
-  public String visitSuperExpr(Expr.Super expr) {
-    return "(super." + expr.method.lexeme + ")";
+  public String visitInnerExpr(Expr.Inner expr) {
+    return "inner";
   }
 
   private String parenthesize(String name, Expr... exprs) {

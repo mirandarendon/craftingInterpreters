@@ -157,10 +157,40 @@ class Parser {
         if (match(IF)) return ifStatement();
         if (match(PRINT)) return printStatement();
         if (match(RETURN)) return returnStatement();
+        if (match(THROW)) return throwStatement();
+        if (match(TRY)) return tryStatement();
         if (match(WHILE)) return whileStatement();
         if (match(LEFT_BRACE)) return new Stmt.Block(block());
 
         return expressionStatement();
+    }
+
+    // Ch13 Challenge 3: 'throw expr;' raises a catchable runtime error.
+    private Stmt throwStatement() {
+        Token keyword = previous();
+        Expr value = expression();
+        consume(SEMICOLON, "Expect ';' after thrown value.");
+        return new Stmt.Throw(keyword, value);
+    }
+
+    // Ch13 Challenge 3: 'try { ... } catch (e) { ... }' or
+    // 'try { ... } catch { ... }' (no bound variable).
+    private Stmt tryStatement() {
+        consume(LEFT_BRACE, "Expect '{' after 'try'.");
+        Stmt tryBlock = new Stmt.Block(block());
+
+        consume(CATCH, "Expect 'catch' after try block.");
+
+        Token catchVar = null;
+        if (match(LEFT_PAREN)) {
+            catchVar = consume(IDENTIFIER, "Expect catch variable name.");
+            consume(RIGHT_PAREN, "Expect ')' after catch variable name.");
+        }
+
+        consume(LEFT_BRACE, "Expect '{' after 'catch'.");
+        Stmt catchBlock = new Stmt.Block(block());
+
+        return new Stmt.Try(tryBlock, catchVar, catchBlock);
     }
 
     private Stmt returnStatement() {
@@ -481,13 +511,10 @@ class Parser {
         return new Expr.Literal(previous().literal);
         }
 
-        // Ch13: 'super.method' inside a subclass method body.
-        if (match(SUPER)) {
-        Token keyword = previous();
-        consume(DOT, "Expect '.' after 'super'.");
-        Token method = consume(IDENTIFIER, "Expect superclass method name.");
-        return new Expr.Super(keyword, method);
-        }
+        // Ch13 Challenge 2: 'inner' (called as 'inner()', via the normal
+        // call() handling for any primary expression) replaces 'super'
+        // under BETA semantics.
+        if (match(INNER)) return new Expr.Inner(previous());
 
         // Ch12: 'this' inside a method body.
         if (match(THIS)) return new Expr.This(previous());
@@ -615,6 +642,9 @@ class Parser {
             case WHILE:
             case PRINT:
             case RETURN:
+            // Ch13 Challenge 3: also resynchronize on a new try/throw.
+            case TRY:
+            case THROW:
             return;
         }
 
