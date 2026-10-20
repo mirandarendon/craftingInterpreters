@@ -4,12 +4,14 @@
 #include "chunk.h"
 #include "value.h"
 
-#define STACK_MAX 256
+#define STACK_MAX 256 // ch15q3: initial capacity
 
 typedef struct {
   Chunk* chunk;
   uint8_t* ip;
-  Value stack[STACK_MAX];
+  // ch15q3: heap stack, grows on demand
+  Value* stack;
+  int stackCapacity;
   Value* stackTop;
 } VM;
 

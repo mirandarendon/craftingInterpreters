@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "debug.h"
+#include "memory.h" // ch15q3
 #include "vm.h"
 
 VM vm;
@@ -11,13 +12,26 @@ static void resetStack() {
 }
 
 void initVM() {
+  // ch15q3: start with STACK_MAX slots
+  vm.stack = GROW_ARRAY(Value, NULL, 0, STACK_MAX);
+  vm.stackCapacity = STACK_MAX;
   resetStack();
 }
 
 void freeVM() {
+  FREE_ARRAY(Value, vm.stack, vm.stackCapacity); // ch15q3
 }
 
 void push(Value value) {
+  // ch15q3: double when full; realloc may move it, so rebase stackTop
+  int count = (int)(vm.stackTop - vm.stack);
+  if (count == vm.stackCapacity) {
+    int oldCapacity = vm.stackCapacity;
+    vm.stackCapacity = GROW_CAPACITY(oldCapacity);
+    vm.stack = GROW_ARRAY(Value, vm.stack, oldCapacity, vm.stackCapacity);
+    vm.stackTop = vm.stack + count;
+  }
+
   *vm.stackTop = value;
   vm.stackTop++;
 }
@@ -37,8 +51,7 @@ static InterpretResult run() {
 #define BINARY_OP(op) \
     do { \
       double b = pop(); \
-      double a = pop(); \
-      push(a op b); \
+      vm.stackTop[-1] = vm.stackTop[-1] op b; /* ch15q4: in place */ \
     } while (false)
 
   for (;;) {
@@ -70,7 +83,8 @@ static InterpretResult run() {
       case OP_SUBTRACT: BINARY_OP(-); break;
       case OP_MULTIPLY: BINARY_OP(*); break;
       case OP_DIVIDE:   BINARY_OP(/); break;
-      case OP_NEGATE:   push(-pop()); break;
+      // ch15q4: negate top of stack in place
+      case OP_NEGATE:   vm.stackTop[-1] = -vm.stackTop[-1]; break;
       case OP_RETURN: {
         printValue(pop());
         printf("\n");
