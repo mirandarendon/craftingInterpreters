@@ -1,1 +1,7 @@
 .vscode
+
+# clox build output
+src/clox/clox
+challenges/clox/clox
+*.dSYM/
+*.o
