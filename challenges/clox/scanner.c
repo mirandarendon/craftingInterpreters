@@ -191,6 +191,8 @@ Token scanToken() {
     case '{': return makeToken(TOKEN_LEFT_BRACE);
     case '}': return makeToken(TOKEN_RIGHT_BRACE);
     case ';': return makeToken(TOKEN_SEMICOLON);
+    case '?': return makeToken(TOKEN_QUESTION); // ch17q3
+    case ':': return makeToken(TOKEN_COLON);    // ch17q3
     case ',': return makeToken(TOKEN_COMMA);
     case '.': return makeToken(TOKEN_DOT);
     case '-': return makeToken(TOKEN_MINUS);

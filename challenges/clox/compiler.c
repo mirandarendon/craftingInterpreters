@@ -19,6 +19,7 @@ typedef struct {
 typedef enum {
   PREC_NONE,
   PREC_ASSIGNMENT,  // =
+  PREC_CONDITIONAL, // ?: ch17q3
   PREC_OR,          // or
   PREC_AND,         // and
   PREC_EQUALITY,    // == !=
@@ -150,6 +151,19 @@ static void number() {
   emitConstant(value);
 }
 
+// ch17q3: cond ? then : else
+static void conditional() {
+  // condition already compiled; would emit jump-if-false here
+
+  // then: anything goes between ? and :
+  expression();
+  consume(TOKEN_COLON, "Expect ':' after then branch of conditional.");
+
+  // else: same precedence, so it's right-associative
+  parsePrecedence(PREC_CONDITIONAL);
+
+}
+
 static void unary() {
   TokenType operatorType = parser.previous.type;
 
@@ -173,6 +187,8 @@ ParseRule rules[] = {
   [TOKEN_MINUS]           = {unary,    binary, PREC_TERM},
   [TOKEN_PLUS]            = {NULL,     binary, PREC_TERM},
   [TOKEN_SEMICOLON]       = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_QUESTION]        = {NULL,     conditional, PREC_CONDITIONAL}, // ch17q3
+  [TOKEN_COLON]           = {NULL,     NULL,   PREC_NONE},        // ch17q3
   [TOKEN_SLASH]           = {NULL,     binary, PREC_FACTOR},
   [TOKEN_STAR]            = {NULL,     binary, PREC_FACTOR},
   [TOKEN_BANG]            = {NULL,     NULL,   PREC_NONE},
