@@ -24,6 +24,7 @@ struct ObjString {
   Obj obj;
   bool ownsChars;    // ch19q2: false if chars points at source
   int length;
+  uint32_t hash;
   const char* chars; // ch19q2: storage or source text
   char storage[];    // ch19q1: flexible array member
 };

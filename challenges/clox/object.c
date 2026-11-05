@@ -3,6 +3,7 @@
 
 #include "memory.h"
 #include "object.h"
+#include "table.h"
 #include "value.h"
 #include "vm.h"
 
@@ -18,6 +19,15 @@ static Obj* allocateObject(size_t size, ObjType type) {
   return object;
 }
 
+static uint32_t hashString(const char* key, int length) {
+  uint32_t hash = 2166136261u;
+  for (int i = 0; i < length; i++) {
+    hash ^= (uint8_t)key[i];
+    hash *= 16777619;
+  }
+  return hash;
+}
+
 // ch19q1: struct and chars in one allocation
 static ObjString* allocateString(int length) {
   ObjString* string = (ObjString*)allocateObject(
@@ -31,16 +41,24 @@ static ObjString* allocateString(int length) {
 
 // ch19q2: copy if owned, else just point at chars
 ObjString* makeString(bool ownsChars, const char* chars, int length) {
+  uint32_t hash = hashString(chars, length);
+  ObjString* interned = tableFindString(&vm.strings, chars, length,
+                                        hash);
+  if (interned != NULL) return interned;
+
+  ObjString* string;
   if (ownsChars) {
-    ObjString* string = allocateString(length);
+    string = allocateString(length);
     memcpy(string->storage, chars, length);
-    return string;
+  } else {
+    string = ALLOCATE_OBJ(ObjString, OBJ_STRING);
+    string->ownsChars = false;
+    string->length = length;
+    string->chars = chars;
   }
 
-  ObjString* string = ALLOCATE_OBJ(ObjString, OBJ_STRING);
-  string->ownsChars = false;
-  string->length = length;
-  string->chars = chars;
+  string->hash = hash;
+  tableSet(&vm.strings, string, NIL_VAL);
   return string;
 }
 
@@ -48,12 +66,15 @@ ObjString* copyString(const char* chars, int length) {
   return makeString(true, chars, length);
 }
 
-// ch19q1
+// ch19q1: temp buffer, must hash before interning
 ObjString* concatenateStrings(ObjString* a, ObjString* b) {
   int length = a->length + b->length;
-  ObjString* result = allocateString(length);
-  memcpy(result->storage, a->chars, a->length);
-  memcpy(result->storage + a->length, b->chars, b->length);
+  char* chars = ALLOCATE(char, length);
+  memcpy(chars, a->chars, a->length);
+  memcpy(chars + a->length, b->chars, b->length);
+
+  ObjString* result = makeString(true, chars, length);
+  FREE_ARRAY(char, chars, length);
   return result;
 }
 

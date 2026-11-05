@@ -33,10 +33,12 @@ void initVM() {
   vm.stackCapacity = STACK_MAX;
   resetStack();
   vm.objects = NULL;
+  initTable(&vm.strings);
 }
 
 void freeVM() {
   FREE_ARRAY(Value, vm.stack, vm.stackCapacity); // ch15q3
+  freeTable(&vm.strings);
   freeObjects();
 }
 

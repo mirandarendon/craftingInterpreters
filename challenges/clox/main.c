@@ -7,7 +7,14 @@
 #include "debug.h"
 #include "vm.h"
 
+// ch19q2: literals point at source, so keep every line
+typedef struct ReplLine {
+  struct ReplLine* next;
+  char text[];
+} ReplLine;
+
 static void repl() {
+  ReplLine* lines = NULL;
   char line[1024];
   for (;;) {
     printf("> ");
@@ -17,7 +24,23 @@ static void repl() {
       break;
     }
 
-    interpret(line);
+    size_t size = strlen(line) + 1;
+    ReplLine* saved = (ReplLine*)malloc(sizeof(ReplLine) + size);
+    if (saved == NULL) {
+      fprintf(stderr, "Not enough memory to read line.\n");
+      exit(74);
+    }
+    memcpy(saved->text, line, size);
+    saved->next = lines;
+    lines = saved;
+
+    interpret(saved->text);
+  }
+
+  while (lines != NULL) {
+    ReplLine* next = lines->next;
+    free(lines);
+    lines = next;
   }
 }
 

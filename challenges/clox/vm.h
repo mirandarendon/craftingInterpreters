@@ -2,6 +2,7 @@
 #define clox_vm_h
 
 #include "chunk.h"
+#include "table.h"
 #include "value.h"
 
 #define STACK_MAX 256 // ch15q3: initial capacity
@@ -13,6 +14,7 @@ typedef struct {
   Value* stack;
   int stackCapacity;
   Value* stackTop;
+  Table strings;
   Obj* objects;
 } VM;
 
