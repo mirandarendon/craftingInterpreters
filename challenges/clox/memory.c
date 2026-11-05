@@ -18,8 +18,9 @@ static void freeObject(Obj* object) {
   switch (object->type) {
     case OBJ_STRING: {
       ObjString* string = (ObjString*)object;
-      FREE_ARRAY(char, string->chars, string->length + 1);
-      FREE(ObjString, object);
+      // ch19q1, ch19q2: only owned strings have inline chars
+      size_t chars = string->ownsChars ? string->length + 1 : 0;
+      reallocate(object, sizeof(ObjString) + chars, 0);
       break;
     }
   }

@@ -181,7 +181,8 @@ static void conditional() {
 }
 
 static void string() {
-  emitConstant(OBJ_VAL(copyString(parser.previous.start + 1,
+  // ch19q2: literal points at source, no copy
+  emitConstant(OBJ_VAL(makeString(false, parser.previous.start + 1,
                                   parser.previous.length - 2)));
 }
 

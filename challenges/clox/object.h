@@ -22,11 +22,14 @@ struct Obj {
 
 struct ObjString {
   Obj obj;
+  bool ownsChars;    // ch19q2: false if chars points at source
   int length;
-  char* chars;
+  const char* chars; // ch19q2: storage or source text
+  char storage[];    // ch19q1: flexible array member
 };
 
-ObjString* takeString(char* chars, int length);
+ObjString* makeString(bool ownsChars, const char* chars, int length); // ch19q2
+ObjString* concatenateStrings(ObjString* a, ObjString* b);            // ch19q1
 ObjString* copyString(const char* chars, int length);
 void printObject(Value value);
 
