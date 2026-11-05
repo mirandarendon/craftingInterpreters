@@ -5,3 +5,4 @@ src/clox/clox
 challenges/clox/clox
 *.dSYM/
 *.o
+challenges/ch_20/q_3/tableBenchmark

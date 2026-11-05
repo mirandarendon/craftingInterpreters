@@ -58,7 +58,7 @@ ObjString* makeString(bool ownsChars, const char* chars, int length) {
   }
 
   string->hash = hash;
-  tableSet(&vm.strings, string, NIL_VAL);
+  tableSet(&vm.strings, OBJ_VAL(string), NIL_VAL); // ch20q1
   return string;
 }
 
