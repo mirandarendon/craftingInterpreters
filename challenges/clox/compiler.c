@@ -42,6 +42,7 @@ typedef struct {
 
 Parser parser;
 Chunk* compilingChunk;
+Table stringConstants; // ch21q1: name -> constant index
 
 static Chunk* currentChunk() {
   return compilingChunk;
@@ -150,14 +151,44 @@ static void declaration();
 static ParseRule* getRule(TokenType type);
 static void parsePrecedence(Precedence precedence);
 
-static uint8_t identifierConstant(Token* name) {
-  return makeConstant(OBJ_VAL(copyString(name->start,
-                                         name->length)));
+// ch21q1: reuse the slot if this name already has one
+// ch21q2 took over globals, so unused until ch27 properties
+__attribute__((unused)) static uint8_t identifierConstant(Token* name) {
+  ObjString* string = copyString(name->start, name->length);
+  Value indexValue;
+
+  if (tableGet(&stringConstants, OBJ_VAL(string), &indexValue)) {
+    return (uint8_t)AS_NUMBER(indexValue);
+  }
+
+  uint8_t index = makeConstant(OBJ_VAL(string));
+  tableSet(&stringConstants, OBJ_VAL(string), NUMBER_VAL((double)index));
+  return index;
+}
+
+// ch21q2: give each global name a slot the first time it's seen
+static uint8_t globalIdentifier(Token* name) {
+  ObjString* string = copyString(name->start, name->length);
+  Value indexValue;
+
+  if (tableGet(&vm.globalNames, OBJ_VAL(string), &indexValue)) {
+    return (uint8_t)AS_NUMBER(indexValue);
+  }
+
+  if (vm.globalValues.count > UINT8_MAX) {
+    error("Too many global variables.");
+    return 0;
+  }
+
+  uint8_t index = (uint8_t)vm.globalValues.count;
+  writeValueArray(&vm.globalValues, UNDEFINED_VAL);
+  tableSet(&vm.globalNames, OBJ_VAL(string), NUMBER_VAL((double)index));
+  return index;
 }
 
 static uint8_t parseVariable(const char* errorMessage) {
   consume(TOKEN_IDENTIFIER, errorMessage);
-  return identifierConstant(&parser.previous);
+  return globalIdentifier(&parser.previous); // ch21q2
 }
 
 static void defineVariable(uint8_t global) {
@@ -223,7 +254,7 @@ static void string(bool canAssign) {
 }
 
 static void namedVariable(Token name, bool canAssign) {
-  uint8_t arg = identifierConstant(&name);
+  uint8_t arg = globalIdentifier(&name); // ch21q2
 
   if (canAssign && match(TOKEN_EQUAL)) {
     expression();
@@ -400,6 +431,7 @@ bool compile(const char* source, Chunk* chunk) {
 
   parser.hadError = false;
   parser.panicMode = false;
+  initTable(&stringConstants); // ch21q1
 
   advance();
 
@@ -408,5 +440,6 @@ bool compile(const char* source, Chunk* chunk) {
   }
 
   endCompiler();
+  freeTable(&stringConstants); // ch21q1
   return !parser.hadError;
 }

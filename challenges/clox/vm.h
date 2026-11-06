@@ -14,7 +14,9 @@ typedef struct {
   Value* stack;
   int stackCapacity;
   Value* stackTop;
-  Table globals;
+  // ch21q2: name -> slot, slot -> value
+  Table globalNames;
+  ValueArray globalValues;
   Table strings;
   Obj* objects;
 } VM;
@@ -32,5 +34,6 @@ void freeVM();
 InterpretResult interpret(const char* source);
 void push(Value value);
 Value pop();
+ObjString* globalName(int index); // ch21q2
 
 #endif

@@ -38,6 +38,8 @@ typedef struct {
 #define NUMBER_VAL(value) ((Value){VAL_NUMBER, {.number = value}})
 #define OBJ_VAL(object)   ((Value){VAL_OBJ, {.obj = (Obj*)object}})
 #define EMPTY_VAL         ((Value){VAL_EMPTY, {.number = 0}}) // ch20q1
+#define UNDEFINED_VAL     EMPTY_VAL // ch21q2: declared, not yet defined
+#define IS_UNDEFINED(value) IS_EMPTY(value) // ch21q2
 
 typedef struct {
   int capacity;

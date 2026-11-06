@@ -27,19 +27,38 @@ static void runtimeError(const char* format, ...) {
   resetStack();
 }
 
+// ch21q2: only errors and the disassembler need this
+ObjString* globalName(int index) {
+  for (int i = 0; i < vm.globalNames.capacity; i++) {
+    Entry* entry = &vm.globalNames.entries[i];
+    if (!IS_EMPTY(entry->key) && AS_NUMBER(entry->value) == index) {
+      return AS_STRING(entry->key);
+    }
+  }
+  return NULL;
+}
+
+// ch21q2: %.* because a name may lack a terminator (ch19q2)
+static void undefinedVariable(int index) {
+  ObjString* name = globalName(index);
+  runtimeError("Undefined variable '%.*s'.", name->length, name->chars);
+}
+
 void initVM() {
   // ch15q3: start with STACK_MAX slots
   vm.stack = GROW_ARRAY(Value, NULL, 0, STACK_MAX);
   vm.stackCapacity = STACK_MAX;
   resetStack();
   vm.objects = NULL;
-  initTable(&vm.globals);
+  initTable(&vm.globalNames);     // ch21q2
+  initValueArray(&vm.globalValues);
   initTable(&vm.strings);
 }
 
 void freeVM() {
   FREE_ARRAY(Value, vm.stack, vm.stackCapacity); // ch15q3
-  freeTable(&vm.globals);
+  freeTable(&vm.globalNames);     // ch21q2
+  freeValueArray(&vm.globalValues);
   freeTable(&vm.strings);
   freeObjects();
 }
@@ -131,31 +150,28 @@ static InterpretResult run() {
       case OP_TRUE: push(BOOL_VAL(true)); break;
       case OP_FALSE: push(BOOL_VAL(false)); break;
       case OP_POP: pop(); break;
+      // ch21q2: operand is a slot, no hash lookup
       case OP_GET_GLOBAL: {
-        ObjString* name = READ_STRING();
-        Value value;
-        if (!tableGet(&vm.globals, OBJ_VAL(name), &value)) { // ch20q1
-          runtimeError("Undefined variable '%.*s'.", name->length,
-                       name->chars); // ch19q2: may lack terminator
+        uint8_t slot = READ_BYTE();
+        Value value = vm.globalValues.values[slot];
+        if (IS_UNDEFINED(value)) {
+          undefinedVariable(slot);
           return INTERPRET_RUNTIME_ERROR;
         }
         push(value);
         break;
       }
       case OP_DEFINE_GLOBAL: {
-        ObjString* name = READ_STRING();
-        tableSet(&vm.globals, OBJ_VAL(name), peek(0)); // ch20q1
-        pop();
+        vm.globalValues.values[READ_BYTE()] = pop();
         break;
       }
       case OP_SET_GLOBAL: {
-        ObjString* name = READ_STRING();
-        if (tableSet(&vm.globals, OBJ_VAL(name), peek(0))) { // ch20q1
-          tableDelete(&vm.globals, OBJ_VAL(name)); // ch20q1
-          runtimeError("Undefined variable '%.*s'.", name->length,
-                       name->chars); // ch19q2: may lack terminator
+        uint8_t slot = READ_BYTE();
+        if (IS_UNDEFINED(vm.globalValues.values[slot])) {
+          undefinedVariable(slot);
           return INTERPRET_RUNTIME_ERROR;
         }
+        vm.globalValues.values[slot] = peek(0);
         break;
       }
       case OP_EQUAL: {

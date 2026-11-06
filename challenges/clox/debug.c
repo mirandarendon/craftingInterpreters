@@ -1,7 +1,9 @@
 #include <stdio.h>
 
 #include "debug.h"
+#include "object.h"
 #include "value.h"
+#include "vm.h"
 
 void disassembleChunk(Chunk* chunk, const char* name) {
   printf("== %s ==\n", name);
@@ -30,6 +32,15 @@ static int longConstantInstruction(const char* name, Chunk* chunk,
   printValue(chunk->constants.values[constant]);
   printf("'\n");
   return offset + 4;
+}
+
+// ch21q2: operand is a global slot, not a constant
+static int globalInstruction(const char* name, Chunk* chunk,
+                             int offset) {
+  uint8_t slot = chunk->code[offset + 1];
+  ObjString* global = globalName(slot);
+  printf("%-16s %4d '%.*s'\n", name, slot, global->length, global->chars);
+  return offset + 2;
 }
 
 static int simpleInstruction(const char* name, int offset) {
@@ -61,11 +72,11 @@ int disassembleInstruction(Chunk* chunk, int offset) {
     case OP_POP:
       return simpleInstruction("OP_POP", offset);
     case OP_GET_GLOBAL:
-      return constantInstruction("OP_GET_GLOBAL", chunk, offset);
+      return globalInstruction("OP_GET_GLOBAL", chunk, offset);
     case OP_DEFINE_GLOBAL:
-      return constantInstruction("OP_DEFINE_GLOBAL", chunk, offset);
+      return globalInstruction("OP_DEFINE_GLOBAL", chunk, offset);
     case OP_SET_GLOBAL:
-      return constantInstruction("OP_SET_GLOBAL", chunk, offset);
+      return globalInstruction("OP_SET_GLOBAL", chunk, offset);
     case OP_EQUAL:
       return simpleInstruction("OP_EQUAL", offset);
     case OP_GREATER:
