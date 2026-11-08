@@ -52,6 +52,7 @@ void initVM() {
   vm.objects = NULL;
   initTable(&vm.globalNames);     // ch21q2
   initValueArray(&vm.globalValues);
+  for (int i = 0; i < UINT8_COUNT; i++) vm.globalConst[i] = false; // ch22q3
   initTable(&vm.strings);
 }
 
@@ -110,6 +111,9 @@ static InterpretResult run() {
 #define READ_CONSTANT_LONG() \
     (vm.ip += 3, vm.chunk->constants.values[vm.ip[-3] | \
         (vm.ip[-2] << 8) | (vm.ip[-1] << 16)])
+// ch22q4: 24-bit operand, low byte first
+#define READ_LONG() \
+    (vm.ip += 3, (uint32_t)(vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)))
 #define BINARY_OP(valueType, op) \
     do { \
       if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
@@ -157,6 +161,16 @@ static InterpretResult run() {
       }
       case OP_SET_LOCAL: {
         uint8_t slot = READ_BYTE();
+        vm.stack[slot] = peek(0);
+        break;
+      }
+      case OP_GET_LOCAL_LONG: { // ch22q4
+        uint32_t slot = READ_LONG();
+        push(vm.stack[slot]);
+        break;
+      }
+      case OP_SET_LOCAL_LONG: { // ch22q4
+        uint32_t slot = READ_LONG();
         vm.stack[slot] = peek(0);
         break;
       }
@@ -236,6 +250,7 @@ static InterpretResult run() {
 #undef READ_CONSTANT
 #undef READ_STRING
 #undef READ_CONSTANT_LONG
+#undef READ_LONG
 #undef BINARY_OP
 }
 

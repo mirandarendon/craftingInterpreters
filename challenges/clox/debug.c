@@ -55,6 +55,16 @@ static int byteInstruction(const char* name, Chunk* chunk,
   return offset + 2;
 }
 
+// ch22q4: 24-bit slot, low byte first
+static int longByteInstruction(const char* name, Chunk* chunk,
+                               int offset) {
+  uint32_t slot = chunk->code[offset + 1] |
+                 (chunk->code[offset + 2] << 8) |
+                 (chunk->code[offset + 3] << 16);
+  printf("%-16s %4d\n", name, slot);
+  return offset + 4;
+}
+
 int disassembleInstruction(Chunk* chunk, int offset) {
   printf("%04d ", offset);
   int line = getLine(chunk, offset); // ch14q1
@@ -82,6 +92,10 @@ int disassembleInstruction(Chunk* chunk, int offset) {
       return byteInstruction("OP_GET_LOCAL", chunk, offset);
     case OP_SET_LOCAL:
       return byteInstruction("OP_SET_LOCAL", chunk, offset);
+    case OP_GET_LOCAL_LONG: // ch22q4
+      return longByteInstruction("OP_GET_LOCAL_LONG", chunk, offset);
+    case OP_SET_LOCAL_LONG: // ch22q4
+      return longByteInstruction("OP_SET_LOCAL_LONG", chunk, offset);
     case OP_GET_GLOBAL:
       return globalInstruction("OP_GET_GLOBAL", chunk, offset);
     case OP_DEFINE_GLOBAL:

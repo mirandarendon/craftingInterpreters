@@ -17,6 +17,7 @@ typedef struct {
   // ch21q2: name -> slot, slot -> value
   Table globalNames;
   ValueArray globalValues;
+  bool globalConst[UINT8_COUNT]; // ch22q3: per slot, compile time
   Table strings;
   Obj* objects;
 } VM;

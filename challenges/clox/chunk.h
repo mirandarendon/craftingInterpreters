@@ -13,6 +13,8 @@ typedef enum {
   OP_POP,
   OP_GET_LOCAL,
   OP_SET_LOCAL,
+  OP_GET_LOCAL_LONG, // ch22q4: 24-bit slot
+  OP_SET_LOCAL_LONG, // ch22q4
   OP_GET_GLOBAL,
   OP_DEFINE_GLOBAL,
   OP_SET_GLOBAL,

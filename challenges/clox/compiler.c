@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include "compiler.h"
+#include "memory.h" // ch22q4
 #include "object.h"
 #include "scanner.h"
 
@@ -44,13 +45,20 @@ typedef struct {
 typedef struct {
   Token name;
   int depth;
+  bool isConst;   // ch22q3
+  ObjString* key; // ch22q1: interned name
+  int shadowed;   // ch22q1: older local with this name, or -1
 } Local;
 
 typedef struct {
-  Local locals[UINT8_COUNT];
+  Local* locals;     // ch22q4: grows, no 256 cap
   int localCount;
+  int localCapacity; // ch22q4
   int scopeDepth;
+  Table localNames;  // ch22q1: name -> newest local
 } Compiler;
+
+#define MAX_LOCALS (1 << 24) // ch22q4: 24-bit slot operand
 
 Parser parser;
 Compiler* current = NULL;
@@ -150,9 +158,18 @@ static void emitConstant(Value value) {
 }
 
 static void initCompiler(Compiler* compiler) {
+  compiler->locals = NULL;        // ch22q4
+  compiler->localCapacity = 0;
   compiler->localCount = 0;
   compiler->scopeDepth = 0;
+  initTable(&compiler->localNames); // ch22q1
   current = compiler;
+}
+
+// ch22q1, ch22q4
+static void freeCompiler(Compiler* compiler) {
+  FREE_ARRAY(Local, compiler->locals, compiler->localCapacity);
+  freeTable(&compiler->localNames);
 }
 
 static void endCompiler() {
@@ -175,6 +192,15 @@ static void endScope() {
          current->locals[current->localCount - 1].depth >
             current->scopeDepth) {
     emitByte(OP_POP);
+
+    // ch22q1: name goes back to the local it shadowed
+    Local* local = &current->locals[current->localCount - 1];
+    if (local->shadowed == -1) {
+      tableDelete(&current->localNames, OBJ_VAL(local->key));
+    } else {
+      tableSet(&current->localNames, OBJ_VAL(local->key),
+               NUMBER_VAL(local->shadowed));
+    }
     current->localCount--;
   }
 }
@@ -220,58 +246,69 @@ static uint8_t globalIdentifier(Token* name) {
   return index;
 }
 
-static bool identifiersEqual(Token* a, Token* b) {
-  if (a->length != b->length) return false;
-  return memcmp(a->start, b->start, a->length) == 0;
+// ch22q1: hash lookup instead of a linear scan
+static int findLocal(Compiler* compiler, Token* name) {
+  if (compiler->localCount == 0) return -1;
+
+  ObjString* key = copyString(name->start, name->length);
+  Value index;
+  if (!tableGet(&compiler->localNames, OBJ_VAL(key), &index)) return -1;
+  return (int)AS_NUMBER(index);
 }
 
 static int resolveLocal(Compiler* compiler, Token* name) {
-  for (int i = compiler->localCount - 1; i >= 0; i--) {
-    Local* local = &compiler->locals[i];
-    if (identifiersEqual(name, &local->name)) {
-      if (local->depth == -1) {
-        error("Can't read local variable in its own initializer.");
-      }
-      return i;
-    }
+  int i = findLocal(compiler, name); // ch22q1
+  if (i != -1 && compiler->locals[i].depth == -1) {
+    error("Can't read local variable in its own initializer.");
   }
-
-  return -1;
+  return i;
 }
 
-static void addLocal(Token name) {
-  if (current->localCount == UINT8_COUNT) {
+static void addLocal(Token name, bool isConst) {
+  if (current->localCount == MAX_LOCALS) { // ch22q4
     error("Too many local variables in function.");
     return;
   }
 
-  Local* local = &current->locals[current->localCount++];
+  // ch22q4: grow instead of stopping at 256
+  if (current->localCount == current->localCapacity) {
+    int oldCapacity = current->localCapacity;
+    current->localCapacity = GROW_CAPACITY(oldCapacity);
+    current->locals = GROW_ARRAY(Local, current->locals,
+                                 oldCapacity, current->localCapacity);
+  }
+
+  int index = current->localCount++;
+  Local* local = &current->locals[index];
   local->name = name;
   local->depth = -1;
+  local->isConst = isConst; // ch22q3
+
+  // ch22q1: remember what this shadows, then point the name here
+  local->key = copyString(name.start, name.length);
+  Value older;
+  local->shadowed = tableGet(&current->localNames, OBJ_VAL(local->key),
+                             &older) ? (int)AS_NUMBER(older) : -1;
+  tableSet(&current->localNames, OBJ_VAL(local->key), NUMBER_VAL(index));
 }
 
-static void declareVariable() {
+static void declareVariable(bool isConst) {
   if (current->scopeDepth == 0) return;
 
   Token* name = &parser.previous;
-  for (int i = current->localCount - 1; i >= 0; i--) {
-    Local* local = &current->locals[i];
-    if (local->depth != -1 && local->depth < current->scopeDepth) {
-      break;
-    }
-
-    if (identifiersEqual(name, &local->name)) {
-      error("Already a variable with this name in this scope.");
-    }
+  // ch22q1: only the newest local with this name can clash
+  int i = findLocal(current, name);
+  if (i != -1 && current->locals[i].depth == current->scopeDepth) {
+    error("Already a variable with this name in this scope.");
   }
 
-  addLocal(*name);
+  addLocal(*name, isConst);
 }
 
-static uint8_t parseVariable(const char* errorMessage) {
+static uint8_t parseVariable(const char* errorMessage, bool isConst) {
   consume(TOKEN_IDENTIFIER, errorMessage);
 
-  declareVariable();
+  declareVariable(isConst); // ch22q3
   if (current->scopeDepth > 0) return 0;
 
   return globalIdentifier(&parser.previous); // ch21q2
@@ -349,23 +386,43 @@ static void string(bool canAssign) {
                                   parser.previous.length - 2)));
 }
 
+// ch22q4: one byte if it fits, else the 24-bit form
+static void emitLocal(uint8_t op, uint8_t longOp, int slot) {
+  if (slot <= UINT8_MAX) {
+    emitBytes(op, (uint8_t)slot);
+    return;
+  }
+  emitByte(longOp);
+  emitByte((uint8_t)(slot & 0xff));
+  emitByte((uint8_t)((slot >> 8) & 0xff));
+  emitByte((uint8_t)((slot >> 16) & 0xff));
+}
+
 static void namedVariable(Token name, bool canAssign) {
-  uint8_t getOp, setOp;
+  bool isConst; // ch22q3
   int arg = resolveLocal(current, &name);
-  if (arg != -1) {
-    getOp = OP_GET_LOCAL;
-    setOp = OP_SET_LOCAL;
+  bool isLocal = arg != -1;
+  if (isLocal) {
+    isConst = current->locals[arg].isConst;
   } else {
     arg = globalIdentifier(&name); // ch21q2
-    getOp = OP_GET_GLOBAL;
-    setOp = OP_SET_GLOBAL;
+    isConst = vm.globalConst[arg];
   }
 
   if (canAssign && match(TOKEN_EQUAL)) {
+    if (isConst) errorAt(&name, "Can't assign to a const variable."); // ch22q3
     expression();
-    emitBytes(setOp, (uint8_t)arg);
+    if (isLocal) {
+      emitLocal(OP_SET_LOCAL, OP_SET_LOCAL_LONG, arg); // ch22q4
+    } else {
+      emitBytes(OP_SET_GLOBAL, (uint8_t)arg);
+    }
   } else {
-    emitBytes(getOp, (uint8_t)arg);
+    if (isLocal) {
+      emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, arg); // ch22q4
+    } else {
+      emitBytes(OP_GET_GLOBAL, (uint8_t)arg);
+    }
   }
 }
 
@@ -414,6 +471,7 @@ ParseRule rules[] = {
   [TOKEN_NUMBER]          = {number,   NULL,   PREC_NONE},
   [TOKEN_AND]             = {NULL,     NULL,   PREC_NONE},
   [TOKEN_CLASS]           = {NULL,     NULL,   PREC_NONE},
+  [TOKEN_CONST]           = {NULL,     NULL,   PREC_NONE}, // ch22q3
   [TOKEN_ELSE]            = {NULL,     NULL,   PREC_NONE},
   [TOKEN_FALSE]           = {literal,  NULL,   PREC_NONE},
   [TOKEN_FOR]             = {NULL,     NULL,   PREC_NONE},
@@ -470,11 +528,15 @@ static void block() {
   consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
 }
 
-static void varDeclaration() {
-  uint8_t global = parseVariable("Expect variable name.");
+static void varDeclaration(bool isConst) {
+  uint8_t global = parseVariable("Expect variable name.", isConst);
+  // ch22q3: a global's latest declaration decides
+  if (current->scopeDepth == 0) vm.globalConst[global] = isConst;
 
   if (match(TOKEN_EQUAL)) {
     expression();
+  } else if (isConst) {
+    error("Expect '=' after const variable name."); // ch22q3
   } else {
     emitByte(OP_NIL);
   }
@@ -503,6 +565,7 @@ static void synchronize() {
     if (parser.previous.type == TOKEN_SEMICOLON) return;
     switch (parser.current.type) {
       case TOKEN_CLASS:
+      case TOKEN_CONST: // ch22q3
       case TOKEN_FUN:
       case TOKEN_VAR:
       case TOKEN_FOR:
@@ -522,7 +585,9 @@ static void synchronize() {
 
 static void declaration() {
   if (match(TOKEN_VAR)) {
-    varDeclaration();
+    varDeclaration(false);
+  } else if (match(TOKEN_CONST)) {
+    varDeclaration(true); // ch22q3
   } else {
     statement();
   }
@@ -559,6 +624,7 @@ bool compile(const char* source, Chunk* chunk) {
   }
 
   endCompiler();
+  freeCompiler(&compiler); // ch22q1, ch22q4
   freeTable(&stringConstants); // ch21q1
   return !parser.hadError;
 }
