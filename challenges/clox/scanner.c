@@ -115,11 +115,18 @@ static TokenType identifierType() {
       // ch22q3: class or const
       if (scanner.current - scanner.start > 1) {
         switch (scanner.start[1]) {
+          case 'a': return checkKeyword(2, 2, "se", TOKEN_CASE); // ch23q1
           case 'l': return checkKeyword(2, 3, "ass", TOKEN_CLASS);
-          case 'o': return checkKeyword(2, 3, "nst", TOKEN_CONST);
+          case 'o':
+            // ch23q2: const or continue
+            if (checkKeyword(2, 3, "nst", TOKEN_CONST) == TOKEN_CONST) {
+              return TOKEN_CONST;
+            }
+            return checkKeyword(2, 6, "ntinue", TOKEN_CONTINUE);
         }
       }
       break;
+    case 'd': return checkKeyword(1, 6, "efault", TOKEN_DEFAULT); // ch23q1
     case 'e': return checkKeyword(1, 3, "lse", TOKEN_ELSE);
     case 'f':
       if (scanner.current - scanner.start > 1) {
@@ -134,8 +141,21 @@ static TokenType identifierType() {
     case 'n': return checkKeyword(1, 2, "il", TOKEN_NIL);
     case 'o': return checkKeyword(1, 1, "r", TOKEN_OR);
     case 'p': return checkKeyword(1, 4, "rint", TOKEN_PRINT);
-    case 'r': return checkKeyword(1, 5, "eturn", TOKEN_RETURN);
-    case 's': return checkKeyword(1, 4, "uper", TOKEN_SUPER);
+    case 'r':
+      // ch23q3: return or repeat
+      if (checkKeyword(1, 5, "eturn", TOKEN_RETURN) == TOKEN_RETURN) {
+        return TOKEN_RETURN;
+      }
+      return checkKeyword(1, 5, "epeat", TOKEN_REPEAT);
+    case 's':
+      // ch23q1: super or switch
+      if (scanner.current - scanner.start > 1) {
+        switch (scanner.start[1]) {
+          case 'u': return checkKeyword(2, 3, "per", TOKEN_SUPER);
+          case 'w': return checkKeyword(2, 4, "itch", TOKEN_SWITCH);
+        }
+      }
+      break;
     case 't':
       if (scanner.current - scanner.start > 1) {
         switch (scanner.start[1]) {

@@ -56,6 +56,8 @@ typedef struct {
   int localCapacity; // ch22q4
   int scopeDepth;
   Table localNames;  // ch22q1: name -> newest local
+  int loopStart;      // ch23q2: continue target, -1 if not in a loop
+  int loopScopeDepth; // ch23q2: locals deeper than this get popped
 } Compiler;
 
 #define MAX_LOCALS (1 << 24) // ch22q4: 24-bit slot operand
@@ -192,6 +194,8 @@ static void initCompiler(Compiler* compiler) {
   compiler->localCount = 0;
   compiler->scopeDepth = 0;
   initTable(&compiler->localNames); // ch22q1
+  compiler->loopStart = -1;         // ch23q2
+  compiler->loopScopeDepth = 0;
   current = compiler;
 }
 
@@ -416,17 +420,21 @@ static void or_(bool canAssign) {
   patchJump(endJump);
 }
 
-// ch17q3: cond ? then : else
+// ch17q3: cond ? then : else, jumps like an if (ch23)
 static void conditional(bool canAssign) {
-  // condition already compiled; would emit jump-if-false here
+  int elseJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
 
   // then: anything goes between ? and :
   expression();
   consume(TOKEN_COLON, "Expect ':' after then branch of conditional.");
+  int endJump = emitJump(OP_JUMP);
 
+  patchJump(elseJump);
+  emitByte(OP_POP);
   // else: same precedence, so it's right-associative
   parsePrecedence(PREC_CONDITIONAL);
-
+  patchJump(endJump);
 }
 
 static void string(bool canAssign) {
@@ -521,6 +529,11 @@ ParseRule rules[] = {
   [TOKEN_AND]             = {NULL,     and_,   PREC_AND},
   [TOKEN_CLASS]           = {NULL,     NULL,   PREC_NONE},
   [TOKEN_CONST]           = {NULL,     NULL,   PREC_NONE}, // ch22q3
+  [TOKEN_SWITCH]          = {NULL,     NULL,   PREC_NONE}, // ch23q1
+  [TOKEN_CASE]            = {NULL,     NULL,   PREC_NONE}, // ch23q1
+  [TOKEN_DEFAULT]         = {NULL,     NULL,   PREC_NONE}, // ch23q1
+  [TOKEN_CONTINUE]        = {NULL,     NULL,   PREC_NONE}, // ch23q2
+  [TOKEN_REPEAT]          = {NULL,     NULL,   PREC_NONE}, // ch23q3
   [TOKEN_ELSE]            = {NULL,     NULL,   PREC_NONE},
   [TOKEN_FALSE]           = {literal,  NULL,   PREC_NONE},
   [TOKEN_FOR]             = {NULL,     NULL,   PREC_NONE},
@@ -635,8 +648,17 @@ static void forStatement() {
     patchJump(bodyJump);
   }
 
+  // ch23q2: continue goes to the increment (or condition)
+  int outerStart = current->loopStart;
+  int outerDepth = current->loopScopeDepth;
+  current->loopStart = loopStart;
+  current->loopScopeDepth = current->scopeDepth;
+
   statement();
   emitLoop(loopStart);
+
+  current->loopStart = outerStart; // ch23q2
+  current->loopScopeDepth = outerDepth;
 
   if (exitJump != -1) {
     patchJump(exitJump);
@@ -678,11 +700,153 @@ static void whileStatement() {
 
   int exitJump = emitJump(OP_JUMP_IF_FALSE);
   emitByte(OP_POP);
+
+  // ch23q2: continue goes back to the condition
+  int outerStart = current->loopStart;
+  int outerDepth = current->loopScopeDepth;
+  current->loopStart = loopStart;
+  current->loopScopeDepth = current->scopeDepth;
+
   statement();
   emitLoop(loopStart);
 
+  current->loopStart = outerStart; // ch23q2
+  current->loopScopeDepth = outerDepth;
+
   patchJump(exitJump);
   emitByte(OP_POP);
+}
+
+// ch23q1, ch23q3: a local the user can't name ("" is no identifier)
+static int addHiddenLocal() {
+  Token name;
+  name.type = TOKEN_IDENTIFIER;
+  name.start = "";
+  name.length = 0;
+  name.line = parser.previous.line;
+  addLocal(name, false);
+  markInitialized();
+  return current->localCount - 1;
+}
+
+// ch23q2
+static void continueStatement() {
+  if (current->loopStart == -1) {
+    error("Can't use 'continue' outside of a loop.");
+  }
+  consume(TOKEN_SEMICOLON, "Expect ';' after 'continue'.");
+
+  // pop the loop body's locals; the compiler still sees them
+  for (int i = current->localCount - 1;
+       i >= 0 && current->locals[i].depth > current->loopScopeDepth;
+       i--) {
+    emitByte(OP_POP);
+  }
+
+  if (current->loopStart != -1) emitLoop(current->loopStart);
+}
+
+#define MAX_CASES 256 // ch23q1
+
+// ch23q1: statements up to the next case, default, or }
+static void caseBody() {
+  while (!check(TOKEN_CASE) && !check(TOKEN_DEFAULT) &&
+         !check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+    statement();
+  }
+}
+
+// ch23q1
+static void switchStatement() {
+  beginScope();
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'switch'.");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after switch value.");
+  int value = addHiddenLocal(); // keeps local slots right
+  consume(TOKEN_LEFT_BRACE, "Expect '{' before switch cases.");
+
+  int endJumps[MAX_CASES];
+  int caseCount = 0;
+  bool sawDefault = false;
+
+  // keep parsing after a misplaced case/default, so errors don't cascade
+  while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+    if (match(TOKEN_CASE)) {
+      if (sawDefault) error("Can't have a case after the default case.");
+      emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, value);
+      expression();
+      consume(TOKEN_COLON, "Expect ':' after case value.");
+      emitByte(OP_EQUAL);
+
+      int nextCase = emitJump(OP_JUMP_IF_FALSE);
+      emitByte(OP_POP);
+      caseBody();
+
+      if (caseCount == MAX_CASES) {
+        error("Too many cases in switch statement.");
+      } else {
+        endJumps[caseCount++] = emitJump(OP_JUMP);
+      }
+
+      patchJump(nextCase);
+      emitByte(OP_POP);
+    } else if (match(TOKEN_DEFAULT)) {
+      if (sawDefault) error("Can't have more than one default case.");
+      sawDefault = true;
+      consume(TOKEN_COLON, "Expect ':' after 'default'.");
+      caseBody();
+    } else {
+      errorAtCurrent("Expect 'case' or 'default' in switch.");
+      break;
+    }
+  }
+
+  consume(TOKEN_RIGHT_BRACE, "Expect '}' after switch cases.");
+
+  for (int i = 0; i < caseCount; i++) patchJump(endJumps[i]);
+  endScope(); // pops the switch value
+}
+
+// ch23q3: repeat (count) statement -- runs body count times
+static void repeatStatement() {
+  beginScope();
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'repeat'.");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after repeat count.");
+  int counter = addHiddenLocal();
+
+  int checkJump = emitJump(OP_JUMP);
+
+  // counter = counter - 1 (continue lands here)
+  int decrementStart = currentChunk()->count;
+  emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, counter);
+  emitConstant(NUMBER_VAL(1));
+  emitByte(OP_SUBTRACT);
+  emitLocal(OP_SET_LOCAL, OP_SET_LOCAL_LONG, counter);
+  emitByte(OP_POP);
+
+  // while counter > 0
+  patchJump(checkJump);
+  emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, counter);
+  emitConstant(NUMBER_VAL(0));
+  emitByte(OP_GREATER);
+  int exitJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
+
+  int outerStart = current->loopStart;
+  int outerDepth = current->loopScopeDepth;
+  current->loopStart = decrementStart;
+  current->loopScopeDepth = current->scopeDepth;
+
+  statement();
+  emitLoop(decrementStart);
+
+  current->loopStart = outerStart;
+  current->loopScopeDepth = outerDepth;
+
+  patchJump(exitJump);
+  emitByte(OP_POP);
+  endScope(); // pops the counter
 }
 
 static void synchronize() {
@@ -693,6 +857,9 @@ static void synchronize() {
     switch (parser.current.type) {
       case TOKEN_CLASS:
       case TOKEN_CONST: // ch22q3
+      case TOKEN_SWITCH: // ch23q1
+      case TOKEN_CONTINUE: // ch23q2
+      case TOKEN_REPEAT: // ch23q3
       case TOKEN_FUN:
       case TOKEN_VAR:
       case TOKEN_FOR:
@@ -731,6 +898,12 @@ static void statement() {
     ifStatement();
   } else if (match(TOKEN_WHILE)) {
     whileStatement();
+  } else if (match(TOKEN_SWITCH)) {
+    switchStatement(); // ch23q1
+  } else if (match(TOKEN_CONTINUE)) {
+    continueStatement(); // ch23q2
+  } else if (match(TOKEN_REPEAT)) {
+    repeatStatement(); // ch23q3
   } else if (match(TOKEN_LEFT_BRACE)) {
     beginScope();
     block();
