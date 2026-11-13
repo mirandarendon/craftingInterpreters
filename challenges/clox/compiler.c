@@ -50,7 +50,16 @@ typedef struct {
   int shadowed;   // ch22q1: older local with this name, or -1
 } Local;
 
-typedef struct {
+typedef enum {
+  TYPE_FUNCTION,
+  TYPE_SCRIPT
+} FunctionType;
+
+typedef struct Compiler {
+  struct Compiler* enclosing;
+  ObjFunction* function;
+  FunctionType type;
+
   Local* locals;     // ch22q4: grows, no 256 cap
   int localCount;
   int localCapacity; // ch22q4
@@ -58,17 +67,16 @@ typedef struct {
   Table localNames;  // ch22q1: name -> newest local
   int loopStart;      // ch23q2: continue target, -1 if not in a loop
   int loopScopeDepth; // ch23q2: locals deeper than this get popped
+  Table stringConstants; // ch21q1: name -> constant index, per chunk
 } Compiler;
 
 #define MAX_LOCALS (1 << 24) // ch22q4: 24-bit slot operand
 
 Parser parser;
 Compiler* current = NULL;
-Chunk* compilingChunk;
-Table stringConstants; // ch21q1: name -> constant index
 
 static Chunk* currentChunk() {
-  return compilingChunk;
+  return &current->function->chunk;
 }
 
 static void errorAt(Token* token, const char* message) {
@@ -153,6 +161,7 @@ static int emitJump(uint8_t instruction) {
 }
 
 static void emitReturn() {
+  emitByte(OP_NIL);
   emitByte(OP_RETURN);
 }
 
@@ -188,30 +197,63 @@ static void patchJump(int offset) {
   currentChunk()->code[offset + 1] = jump & 0xff;
 }
 
-static void initCompiler(Compiler* compiler) {
+static void addLocal(Token name, bool isConst);
+
+static void initCompiler(Compiler* compiler, FunctionType type) {
+  compiler->enclosing = current;
+  compiler->function = NULL;
+  compiler->type = type;
   compiler->locals = NULL;        // ch22q4
   compiler->localCapacity = 0;
   compiler->localCount = 0;
   compiler->scopeDepth = 0;
   initTable(&compiler->localNames); // ch22q1
+  initTable(&compiler->stringConstants); // ch21q1
   compiler->loopStart = -1;         // ch23q2
   compiler->loopScopeDepth = 0;
+  compiler->function = newFunction();
   current = compiler;
+  if (type != TYPE_SCRIPT) {
+    current->function->name = copyString(parser.previous.start,
+                                         parser.previous.length);
+  }
+
+  // slot 0 belongs to the callee; "" can't be named (ch22q4: grows locals)
+  Token name;
+  name.type = TOKEN_IDENTIFIER;
+  name.start = "";
+  name.length = 0;
+  name.line = parser.previous.line;
+  addLocal(name, false);
+  current->locals[0].depth = 0;
 }
 
 // ch22q1, ch22q4
 static void freeCompiler(Compiler* compiler) {
   FREE_ARRAY(Local, compiler->locals, compiler->localCapacity);
   freeTable(&compiler->localNames);
+  freeTable(&compiler->stringConstants); // ch21q1
 }
 
-static void endCompiler() {
+static ObjFunction* endCompiler() {
   emitReturn();
+  ObjFunction* function = current->function;
+
 #ifdef DEBUG_PRINT_CODE
   if (!parser.hadError) {
-    disassembleChunk(currentChunk(), "code");
+    // ch19q2: name may lack a terminator, so copy it out
+    char name[256] = "<script>";
+    if (function->name != NULL) {
+      snprintf(name, sizeof(name), "%.*s", function->name->length,
+               function->name->chars);
+    }
+    disassembleChunk(currentChunk(), name);
   }
 #endif
+
+  freeCompiler(current); // ch22q1, ch22q4
+  current = current->enclosing;
+  return function;
 }
 
 static void beginScope() {
@@ -250,12 +292,12 @@ __attribute__((unused)) static uint8_t identifierConstant(Token* name) {
   ObjString* string = copyString(name->start, name->length);
   Value indexValue;
 
-  if (tableGet(&stringConstants, OBJ_VAL(string), &indexValue)) {
+  if (tableGet(&current->stringConstants, OBJ_VAL(string), &indexValue)) {
     return (uint8_t)AS_NUMBER(indexValue);
   }
 
   uint8_t index = makeConstant(OBJ_VAL(string));
-  tableSet(&stringConstants, OBJ_VAL(string), NUMBER_VAL((double)index));
+  tableSet(&current->stringConstants, OBJ_VAL(string), NUMBER_VAL((double)index));
   return index;
 }
 
@@ -348,6 +390,7 @@ static uint8_t parseVariable(const char* errorMessage, bool isConst) {
 }
 
 static void markInitialized() {
+  if (current->scopeDepth == 0) return;
   current->locals[current->localCount - 1].depth =
       current->scopeDepth;
 }
@@ -359,6 +402,21 @@ static void defineVariable(uint8_t global) {
   }
 
   emitBytes(OP_DEFINE_GLOBAL, global);
+}
+
+static uint8_t argumentList() {
+  uint8_t argCount = 0;
+  if (!check(TOKEN_RIGHT_PAREN)) {
+    do {
+      expression();
+      if (argCount == 255) {
+        error("Can't have more than 255 arguments.");
+      }
+      argCount++;
+    } while (match(TOKEN_COMMA));
+  }
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after arguments.");
+  return argCount;
 }
 
 static void and_(bool canAssign) {
@@ -388,6 +446,11 @@ static void binary(bool canAssign) {
     case TOKEN_SLASH:         emitByte(OP_DIVIDE); break;
     default: return; // Unreachable.
   }
+}
+
+static void call(bool canAssign) {
+  uint8_t argCount = argumentList();
+  emitBytes(OP_CALL, argCount);
 }
 
 static void literal(bool canAssign) {
@@ -502,7 +565,7 @@ static void unary(bool canAssign) {
 }
 
 ParseRule rules[] = {
-  [TOKEN_LEFT_PAREN]      = {grouping, NULL,   PREC_NONE},
+  [TOKEN_LEFT_PAREN]      = {grouping, call,   PREC_CALL},
   [TOKEN_RIGHT_PAREN]     = {NULL,     NULL,   PREC_NONE},
   [TOKEN_LEFT_BRACE]      = {NULL,     NULL,   PREC_NONE},
   [TOKEN_RIGHT_BRACE]     = {NULL,     NULL,   PREC_NONE},
@@ -588,6 +651,39 @@ static void block() {
   }
 
   consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
+}
+
+static void function(FunctionType type) {
+  Compiler compiler;
+  initCompiler(&compiler, type);
+  beginScope();
+
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after function name.");
+  if (!check(TOKEN_RIGHT_PAREN)) {
+    do {
+      current->function->arity++;
+      if (current->function->arity > 255) {
+        errorAtCurrent("Can't have more than 255 parameters.");
+      }
+      uint8_t constant = parseVariable("Expect parameter name.", false);
+      defineVariable(constant);
+    } while (match(TOKEN_COMMA));
+  }
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after parameters.");
+  consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+  block();
+
+  ObjFunction* function = endCompiler();
+  emitConstant(OBJ_VAL(function)); // ch14q2: long form if needed
+}
+
+static void funDeclaration() {
+  uint8_t global = parseVariable("Expect function name.", false);
+  // ch22q3: a global's latest declaration decides
+  if (current->scopeDepth == 0) vm.globalConst[global] = false;
+  markInitialized();
+  function(TYPE_FUNCTION);
+  defineVariable(global);
 }
 
 static void varDeclaration(bool isConst) {
@@ -690,6 +786,20 @@ static void printStatement() {
   expression();
   consume(TOKEN_SEMICOLON, "Expect ';' after value.");
   emitByte(OP_PRINT);
+}
+
+static void returnStatement() {
+  if (current->type == TYPE_SCRIPT) {
+    error("Can't return from top-level code.");
+  }
+
+  if (match(TOKEN_SEMICOLON)) {
+    emitReturn();
+  } else {
+    expression();
+    consume(TOKEN_SEMICOLON, "Expect ';' after return value.");
+    emitByte(OP_RETURN);
+  }
 }
 
 static void whileStatement() {
@@ -878,7 +988,9 @@ static void synchronize() {
 }
 
 static void declaration() {
-  if (match(TOKEN_VAR)) {
+  if (match(TOKEN_FUN)) {
+    funDeclaration();
+  } else if (match(TOKEN_VAR)) {
     varDeclaration(false);
   } else if (match(TOKEN_CONST)) {
     varDeclaration(true); // ch22q3
@@ -896,6 +1008,8 @@ static void statement() {
     forStatement();
   } else if (match(TOKEN_IF)) {
     ifStatement();
+  } else if (match(TOKEN_RETURN)) {
+    returnStatement();
   } else if (match(TOKEN_WHILE)) {
     whileStatement();
   } else if (match(TOKEN_SWITCH)) {
@@ -913,15 +1027,14 @@ static void statement() {
   }
 }
 
-bool compile(const char* source, Chunk* chunk) {
+ObjFunction* compile(const char* source) {
   initScanner(source);
-  Compiler compiler;
-  initCompiler(&compiler);
-  compilingChunk = chunk;
 
   parser.hadError = false;
   parser.panicMode = false;
-  initTable(&stringConstants); // ch21q1
+
+  Compiler compiler;
+  initCompiler(&compiler, TYPE_SCRIPT);
 
   advance();
 
@@ -929,8 +1042,6 @@ bool compile(const char* source, Chunk* chunk) {
     declaration();
   }
 
-  endCompiler();
-  freeCompiler(&compiler); // ch22q1, ch22q4
-  freeTable(&stringConstants); // ch21q1
-  return !parser.hadError;
+  ObjFunction* function = endCompiler();
+  return parser.hadError ? NULL : function;
 }

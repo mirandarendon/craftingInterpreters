@@ -1,5 +1,7 @@
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 #include "common.h"
 #include "compiler.h"
@@ -10,8 +12,13 @@
 
 VM vm;
 
+static Value clockNative(int argCount, Value* args) {
+  return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+}
+
 static void resetStack() {
   vm.stackTop = vm.stack;
+  vm.frameCount = 0;
 }
 
 static void runtimeError(const char* format, ...) {
@@ -21,9 +28,21 @@ static void runtimeError(const char* format, ...) {
   va_end(args);
   fputs("\n", stderr);
 
-  size_t instruction = vm.ip - vm.chunk->code - 1;
-  int line = getLine(vm.chunk, (int)instruction); // ch14q1
-  fprintf(stderr, "[line %d] in script\n", line);
+  for (int i = vm.frameCount - 1; i >= 0; i--) {
+    CallFrame* frame = &vm.frames[i];
+    ObjFunction* function = frame->function;
+    size_t instruction = frame->ip - function->chunk.code - 1;
+    fprintf(stderr, "[line %d] in ",
+            getLine(&function->chunk, (int)instruction)); // ch14q1
+    if (function->name == NULL) {
+      fprintf(stderr, "script\n");
+    } else {
+      // ch19q2: name may lack a terminator
+      fprintf(stderr, "%.*s()\n", function->name->length,
+              function->name->chars);
+    }
+  }
+
   resetStack();
 }
 
@@ -44,6 +63,17 @@ static void undefinedVariable(int index) {
   runtimeError("Undefined variable '%.*s'.", name->length, name->chars);
 }
 
+// ch21q2: globals live in slots, so give the native one
+static void defineNative(const char* name, NativeFn function) {
+  push(OBJ_VAL(copyString(name, (int)strlen(name))));
+  push(OBJ_VAL(newNative(function)));
+  int slot = vm.globalValues.count;
+  writeValueArray(&vm.globalValues, vm.stack[1]);
+  tableSet(&vm.globalNames, vm.stack[0], NUMBER_VAL((double)slot));
+  pop();
+  pop();
+}
+
 void initVM() {
   // ch15q3: start with STACK_MAX slots
   vm.stack = GROW_ARRAY(Value, NULL, 0, STACK_MAX);
@@ -54,6 +84,8 @@ void initVM() {
   initValueArray(&vm.globalValues);
   for (int i = 0; i < UINT8_COUNT; i++) vm.globalConst[i] = false; // ch22q3
   initTable(&vm.strings);
+
+  defineNative("clock", clockNative);
 }
 
 void freeVM() {
@@ -66,12 +98,22 @@ void freeVM() {
 
 void push(Value value) {
   // ch15q3: double when full; realloc may move it, so rebase stackTop
+  // and every frame's slots
   int count = (int)(vm.stackTop - vm.stack);
   if (count == vm.stackCapacity) {
+    int frameBases[FRAMES_MAX];
+    for (int i = 0; i < vm.frameCount; i++) {
+      frameBases[i] = (int)(vm.frames[i].slots - vm.stack);
+    }
+
     int oldCapacity = vm.stackCapacity;
     vm.stackCapacity = GROW_CAPACITY(oldCapacity);
     vm.stack = GROW_ARRAY(Value, vm.stack, oldCapacity, vm.stackCapacity);
     vm.stackTop = vm.stack + count;
+
+    for (int i = 0; i < vm.frameCount; i++) {
+      vm.frames[i].slots = vm.stack + frameBases[i];
+    }
   }
 
   *vm.stackTop = value;
@@ -85,6 +127,45 @@ Value pop() {
 
 static Value peek(int distance) {
   return vm.stackTop[-1 - distance];
+}
+
+static bool call(ObjFunction* function, int argCount) {
+  if (argCount != function->arity) {
+    runtimeError("Expected %d arguments but got %d.",
+        function->arity, argCount);
+    return false;
+  }
+
+  if (vm.frameCount == FRAMES_MAX) {
+    runtimeError("Stack overflow.");
+    return false;
+  }
+
+  CallFrame* frame = &vm.frames[vm.frameCount++];
+  frame->function = function;
+  frame->ip = function->chunk.code;
+  frame->slots = vm.stackTop - argCount - 1;
+  return true;
+}
+
+static bool callValue(Value callee, int argCount) {
+  if (IS_OBJ(callee)) {
+    switch (OBJ_TYPE(callee)) {
+      case OBJ_FUNCTION:
+        return call(AS_FUNCTION(callee), argCount);
+      case OBJ_NATIVE: {
+        NativeFn native = AS_NATIVE(callee);
+        Value result = native(argCount, vm.stackTop - argCount);
+        vm.stackTop -= argCount + 1;
+        push(result);
+        return true;
+      }
+      default:
+        break; // Non-callable object type.
+    }
+  }
+  runtimeError("Can only call functions and classes.");
+  return false;
 }
 
 static bool isFalsey(Value value) {
@@ -104,18 +185,23 @@ static void concatenate() {
 }
 
 static InterpretResult run() {
-#define READ_BYTE() (*vm.ip++)
+  CallFrame* frame = &vm.frames[vm.frameCount - 1];
+
+#define READ_BYTE() (*frame->ip++)
 #define READ_SHORT() \
-    (vm.ip += 2, (uint16_t)((vm.ip[-2] << 8) | vm.ip[-1]))
-#define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+    (frame->ip += 2, \
+    (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+#define READ_CONSTANT() \
+    (frame->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 // ch14q2: 24-bit index, low byte first
 #define READ_CONSTANT_LONG() \
-    (vm.ip += 3, vm.chunk->constants.values[vm.ip[-3] | \
-        (vm.ip[-2] << 8) | (vm.ip[-1] << 16)])
+    (frame->ip += 3, frame->function->chunk.constants.values[ \
+        frame->ip[-3] | (frame->ip[-2] << 8) | (frame->ip[-1] << 16)])
 // ch22q4: 24-bit operand, low byte first
 #define READ_LONG() \
-    (vm.ip += 3, (uint32_t)(vm.ip[-3] | (vm.ip[-2] << 8) | (vm.ip[-1] << 16)))
+    (frame->ip += 3, (uint32_t)(frame->ip[-3] | \
+        (frame->ip[-2] << 8) | (frame->ip[-1] << 16)))
 #define BINARY_OP(valueType, op) \
     do { \
       if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
@@ -136,8 +222,8 @@ static InterpretResult run() {
       printf(" ]");
     }
     printf("\n");
-    disassembleInstruction(vm.chunk,
-                           (int)(vm.ip - vm.chunk->code));
+    disassembleInstruction(&frame->function->chunk,
+        (int)(frame->ip - frame->function->chunk.code));
 #endif
 
     uint8_t instruction;
@@ -158,22 +244,22 @@ static InterpretResult run() {
       case OP_POP: pop(); break;
       case OP_GET_LOCAL: {
         uint8_t slot = READ_BYTE();
-        push(vm.stack[slot]);
+        push(frame->slots[slot]);
         break;
       }
       case OP_SET_LOCAL: {
         uint8_t slot = READ_BYTE();
-        vm.stack[slot] = peek(0);
+        frame->slots[slot] = peek(0);
         break;
       }
       case OP_GET_LOCAL_LONG: { // ch22q4
         uint32_t slot = READ_LONG();
-        push(vm.stack[slot]);
+        push(frame->slots[slot]);
         break;
       }
       case OP_SET_LOCAL_LONG: { // ch22q4
         uint32_t slot = READ_LONG();
-        vm.stack[slot] = peek(0);
+        frame->slots[slot] = peek(0);
         break;
       }
       // ch21q2: operand is a slot, no hash lookup
@@ -243,22 +329,39 @@ static InterpretResult run() {
       }
       case OP_JUMP: {
         uint16_t offset = READ_SHORT();
-        vm.ip += offset;
+        frame->ip += offset;
         break;
       }
       case OP_JUMP_IF_FALSE: {
         uint16_t offset = READ_SHORT();
-        if (isFalsey(peek(0))) vm.ip += offset;
+        if (isFalsey(peek(0))) frame->ip += offset;
         break;
       }
       case OP_LOOP: {
         uint16_t offset = READ_SHORT();
-        vm.ip -= offset;
+        frame->ip -= offset;
+        break;
+      }
+      case OP_CALL: {
+        int argCount = READ_BYTE();
+        if (!callValue(peek(argCount), argCount)) {
+          return INTERPRET_RUNTIME_ERROR;
+        }
+        frame = &vm.frames[vm.frameCount - 1];
         break;
       }
       case OP_RETURN: {
-        // Exit interpreter.
-        return INTERPRET_OK;
+        Value result = pop();
+        vm.frameCount--;
+        if (vm.frameCount == 0) {
+          pop();
+          return INTERPRET_OK;
+        }
+
+        vm.stackTop = frame->slots;
+        push(result);
+        frame = &vm.frames[vm.frameCount - 1];
+        break;
       }
     }
   }
@@ -273,19 +376,11 @@ static InterpretResult run() {
 }
 
 InterpretResult interpret(const char* source) {
-  Chunk chunk;
-  initChunk(&chunk);
+  ObjFunction* function = compile(source);
+  if (function == NULL) return INTERPRET_COMPILE_ERROR;
 
-  if (!compile(source, &chunk)) {
-    freeChunk(&chunk);
-    return INTERPRET_COMPILE_ERROR;
-  }
+  push(OBJ_VAL(function));
+  call(function, 0);
 
-  vm.chunk = &chunk;
-  vm.ip = vm.chunk->code;
-
-  InterpretResult result = run();
-
-  freeChunk(&chunk);
-  return result;
+  return run();
 }
