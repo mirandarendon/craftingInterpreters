@@ -1,5 +1,7 @@
 #include <stdarg.h>
+#include <math.h> // ch24q4
 #include <stdio.h>
+#include <stdlib.h> // ch24q4
 #include <string.h>
 #include <time.h>
 
@@ -11,10 +13,6 @@
 #include "vm.h"
 
 VM vm;
-
-static Value clockNative(int argCount, Value* args) {
-  return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
-}
 
 static void resetStack() {
   vm.stackTop = vm.stack;
@@ -63,10 +61,153 @@ static void undefinedVariable(int index) {
   runtimeError("Undefined variable '%.*s'.", name->length, name->chars);
 }
 
+// ch24q3: natives return false after reporting an error
+static bool clockNative(int argCount, Value* args) {
+  args[-1] = NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
+  return true;
+}
+
+// ch24q3: shared type check for natives
+static bool expectNumber(const char* fn, Value* args, int i) {
+  if (IS_NUMBER(args[i])) return true;
+  runtimeError("%s() argument %d must be a number.", fn, i + 1);
+  return false;
+}
+
+static bool expectString(const char* fn, Value* args, int i) {
+  if (IS_STRING(args[i])) return true;
+  runtimeError("%s() argument %d must be a string.", fn, i + 1);
+  return false;
+}
+
+// ch24q4: math
+static bool sqrtNative(int argCount, Value* args) {
+  if (!expectNumber("sqrt", args, 0)) return false;
+  double n = AS_NUMBER(args[0]);
+  if (n < 0) {
+    runtimeError("sqrt() of a negative number.");
+    return false;
+  }
+  args[-1] = NUMBER_VAL(sqrt(n));
+  return true;
+}
+
+static bool floorNative(int argCount, Value* args) {
+  if (!expectNumber("floor", args, 0)) return false;
+  args[-1] = NUMBER_VAL(floor(AS_NUMBER(args[0])));
+  return true;
+}
+
+static bool absNative(int argCount, Value* args) {
+  if (!expectNumber("abs", args, 0)) return false;
+  args[-1] = NUMBER_VAL(fabs(AS_NUMBER(args[0])));
+  return true;
+}
+
+static bool powNative(int argCount, Value* args) {
+  if (!expectNumber("pow", args, 0) || !expectNumber("pow", args, 1)) {
+    return false;
+  }
+  args[-1] = NUMBER_VAL(pow(AS_NUMBER(args[0]), AS_NUMBER(args[1])));
+  return true;
+}
+
+// ch24q4: random() in [0, 1)
+static bool randomNative(int argCount, Value* args) {
+  args[-1] = NUMBER_VAL((double)rand() / ((double)RAND_MAX + 1));
+  return true;
+}
+
+// ch24q4: strings
+static bool lenNative(int argCount, Value* args) {
+  if (!expectString("len", args, 0)) return false;
+  args[-1] = NUMBER_VAL(AS_STRING(args[0])->length);
+  return true;
+}
+
+// substr(s, start, length), clamped to the string
+static bool substrNative(int argCount, Value* args) {
+  if (!expectString("substr", args, 0) ||
+      !expectNumber("substr", args, 1) ||
+      !expectNumber("substr", args, 2)) {
+    return false;
+  }
+  ObjString* s = AS_STRING(args[0]);
+  int start = (int)AS_NUMBER(args[1]);
+  int length = (int)AS_NUMBER(args[2]);
+  if (start < 0) start = 0;
+  if (start > s->length) start = s->length;
+  if (length < 0) length = 0;
+  if (start + length > s->length) length = s->length - start;
+  args[-1] = OBJ_VAL(copyString(s->chars + start, length));
+  return true;
+}
+
+// str(value): number/bool/nil to string, strings pass through
+static bool strNative(int argCount, Value* args) {
+  Value v = args[0];
+  char buffer[64];
+  const char* text;
+  switch (v.type) {
+    case VAL_NUMBER:
+      snprintf(buffer, sizeof(buffer), "%g", AS_NUMBER(v));
+      text = buffer;
+      break;
+    case VAL_BOOL: text = AS_BOOL(v) ? "true" : "false"; break;
+    case VAL_NIL:  text = "nil"; break;
+    default:
+      if (IS_STRING(v)) {
+        args[-1] = v;
+        return true;
+      }
+      runtimeError("str() can't convert that value.");
+      return false;
+  }
+  args[-1] = OBJ_VAL(copyString(text, (int)strlen(text)));
+  return true;
+}
+
+// num(s): parse a string, nil if it isn't a number
+static bool numNative(int argCount, Value* args) {
+  if (!expectString("num", args, 0)) return false;
+  ObjString* s = AS_STRING(args[0]);
+  char buffer[64];
+  if (s->length == 0 || s->length >= (int)sizeof(buffer)) {
+    args[-1] = NIL_VAL;
+    return true;
+  }
+  memcpy(buffer, s->chars, s->length); // ch19q2: may lack terminator
+  buffer[s->length] = '\0';
+  char* end;
+  double n = strtod(buffer, &end);
+  args[-1] = *end == '\0' ? NUMBER_VAL(n) : NIL_VAL;
+  return true;
+}
+
+// ch24q4: input() reads a line from stdin, nil at EOF
+static bool inputNative(int argCount, Value* args) {
+  char line[1024];
+  if (fgets(line, sizeof(line), stdin) == NULL) {
+    args[-1] = NIL_VAL;
+    return true;
+  }
+  int length = (int)strcspn(line, "\r\n");
+  args[-1] = OBJ_VAL(copyString(line, length));
+  return true;
+}
+
+// ch24q3: error(message) raises a runtime error from Lox
+static bool errorNative(int argCount, Value* args) {
+  if (!expectString("error", args, 0)) return false;
+  ObjString* message = AS_STRING(args[0]);
+  runtimeError("%.*s", message->length, message->chars);
+  return false;
+}
+
 // ch21q2: globals live in slots, so give the native one
-static void defineNative(const char* name, NativeFn function) {
+static void defineNative(const char* name, NativeFn function, int arity) {
   push(OBJ_VAL(copyString(name, (int)strlen(name))));
-  push(OBJ_VAL(newNative(function)));
+  push(OBJ_VAL(newNative(function, arity, name))); // ch24q2
   int slot = vm.globalValues.count;
   writeValueArray(&vm.globalValues, vm.stack[1]);
   tableSet(&vm.globalNames, vm.stack[0], NUMBER_VAL((double)slot));
@@ -85,7 +226,19 @@ void initVM() {
   for (int i = 0; i < UINT8_COUNT; i++) vm.globalConst[i] = false; // ch22q3
   initTable(&vm.strings);
 
-  defineNative("clock", clockNative);
+  defineNative("clock", clockNative, 0); // ch24q2: arities
+  defineNative("sqrt", sqrtNative, 1);   // ch24q4
+  defineNative("floor", floorNative, 1);
+  defineNative("abs", absNative, 1);
+  defineNative("pow", powNative, 2);
+  defineNative("random", randomNative, 0);
+  defineNative("len", lenNative, 1);
+  defineNative("substr", substrNative, 3);
+  defineNative("str", strNative, 1);
+  defineNative("num", numNative, 1);
+  defineNative("input", inputNative, 0);
+  defineNative("error", errorNative, 1);
+  srand((unsigned)time(NULL));
 }
 
 void freeVM() {
@@ -154,10 +307,18 @@ static bool callValue(Value callee, int argCount) {
       case OBJ_FUNCTION:
         return call(AS_FUNCTION(callee), argCount);
       case OBJ_NATIVE: {
-        NativeFn native = AS_NATIVE(callee);
-        Value result = native(argCount, vm.stackTop - argCount);
-        vm.stackTop -= argCount + 1;
-        push(result);
+        ObjNative* native = AS_NATIVE(callee);
+        // ch24q2: check arity like Lox functions do
+        if (native->arity != -1 && argCount != native->arity) {
+          runtimeError("Expected %d arguments but got %d.",
+              native->arity, argCount);
+          return false;
+        }
+        // ch24q3: result lands in the callee's slot
+        if (!native->function(argCount, vm.stackTop - argCount)) {
+          return false;
+        }
+        vm.stackTop -= argCount;
         return true;
       }
       default:
@@ -186,25 +347,28 @@ static void concatenate() {
 
 static InterpretResult run() {
   CallFrame* frame = &vm.frames[vm.frameCount - 1];
+  register uint8_t* ip = frame->ip; // ch24q1: lives in a local
 
-#define READ_BYTE() (*frame->ip++)
+// ch24q1: frame->ip is only synced on calls, returns, and errors
+#define SAVE_IP() (frame->ip = ip)
+#define LOAD_IP() (ip = frame->ip)
+#define READ_BYTE() (*ip++)
 #define READ_SHORT() \
-    (frame->ip += 2, \
-    (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+    (ip += 2, (uint16_t)((ip[-2] << 8) | ip[-1]))
 #define READ_CONSTANT() \
     (frame->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 // ch14q2: 24-bit index, low byte first
 #define READ_CONSTANT_LONG() \
-    (frame->ip += 3, frame->function->chunk.constants.values[ \
-        frame->ip[-3] | (frame->ip[-2] << 8) | (frame->ip[-1] << 16)])
+    (ip += 3, frame->function->chunk.constants.values[ \
+        ip[-3] | (ip[-2] << 8) | (ip[-1] << 16)])
 // ch22q4: 24-bit operand, low byte first
 #define READ_LONG() \
-    (frame->ip += 3, (uint32_t)(frame->ip[-3] | \
-        (frame->ip[-2] << 8) | (frame->ip[-1] << 16)))
+    (ip += 3, (uint32_t)(ip[-3] | (ip[-2] << 8) | (ip[-1] << 16)))
 #define BINARY_OP(valueType, op) \
     do { \
       if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
+        SAVE_IP(); /* ch24q1 */ \
         runtimeError("Operands must be numbers."); \
         return INTERPRET_RUNTIME_ERROR; \
       } \
@@ -223,7 +387,7 @@ static InterpretResult run() {
     }
     printf("\n");
     disassembleInstruction(&frame->function->chunk,
-        (int)(frame->ip - frame->function->chunk.code));
+        (int)(ip - frame->function->chunk.code)); // ch24q1
 #endif
 
     uint8_t instruction;
@@ -267,6 +431,7 @@ static InterpretResult run() {
         uint8_t slot = READ_BYTE();
         Value value = vm.globalValues.values[slot];
         if (IS_UNDEFINED(value)) {
+          SAVE_IP(); // ch24q1
           undefinedVariable(slot);
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -280,6 +445,7 @@ static InterpretResult run() {
       case OP_SET_GLOBAL: {
         uint8_t slot = READ_BYTE();
         if (IS_UNDEFINED(vm.globalValues.values[slot])) {
+          SAVE_IP(); // ch24q1
           undefinedVariable(slot);
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -302,6 +468,7 @@ static InterpretResult run() {
           // ch15q4: in place
           vm.stackTop[-1] = NUMBER_VAL(AS_NUMBER(vm.stackTop[-1]) + b);
         } else {
+          SAVE_IP(); // ch24q1
           runtimeError(
               "Operands must be two numbers or two strings.");
           return INTERPRET_RUNTIME_ERROR;
@@ -316,6 +483,7 @@ static InterpretResult run() {
         break;
       case OP_NEGATE:
         if (!IS_NUMBER(peek(0))) {
+          SAVE_IP(); // ch24q1
           runtimeError("Operand must be a number.");
           return INTERPRET_RUNTIME_ERROR;
         }
@@ -329,25 +497,27 @@ static InterpretResult run() {
       }
       case OP_JUMP: {
         uint16_t offset = READ_SHORT();
-        frame->ip += offset;
+        ip += offset;
         break;
       }
       case OP_JUMP_IF_FALSE: {
         uint16_t offset = READ_SHORT();
-        if (isFalsey(peek(0))) frame->ip += offset;
+        if (isFalsey(peek(0))) ip += offset;
         break;
       }
       case OP_LOOP: {
         uint16_t offset = READ_SHORT();
-        frame->ip -= offset;
+        ip -= offset;
         break;
       }
       case OP_CALL: {
         int argCount = READ_BYTE();
+        SAVE_IP(); // ch24q1: caller resumes here; errors read it too
         if (!callValue(peek(argCount), argCount)) {
           return INTERPRET_RUNTIME_ERROR;
         }
         frame = &vm.frames[vm.frameCount - 1];
+        LOAD_IP();
         break;
       }
       case OP_RETURN: {
@@ -361,11 +531,14 @@ static InterpretResult run() {
         vm.stackTop = frame->slots;
         push(result);
         frame = &vm.frames[vm.frameCount - 1];
+        LOAD_IP(); // ch24q1
         break;
       }
     }
   }
 
+#undef SAVE_IP
+#undef LOAD_IP
 #undef READ_BYTE
 #undef READ_SHORT
 #undef READ_CONSTANT

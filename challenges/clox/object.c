@@ -27,9 +27,11 @@ ObjFunction* newFunction() {
   return function;
 }
 
-ObjNative* newNative(NativeFn function) {
+ObjNative* newNative(NativeFn function, int arity, const char* name) {
   ObjNative* native = ALLOCATE_OBJ(ObjNative, OBJ_NATIVE);
   native->function = function;
+  native->arity = arity; // ch24q2
+  native->name = name;
   return native;
 }
 
@@ -107,7 +109,7 @@ void printObject(Value value) {
       printFunction(AS_FUNCTION(value));
       break;
     case OBJ_NATIVE:
-      printf("<native fn>");
+      printf("<native fn %s>", AS_NATIVE(value)->name); // ch24q2
       break;
     case OBJ_STRING:
       // ch19q2: constant strings have no terminator
