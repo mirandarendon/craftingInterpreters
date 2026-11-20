@@ -1,0 +1,10 @@
+// closures: create a new capturing closure every iteration
+var start = clock();
+var sum = 0;
+for (var i = 0; i < 2000000; i = i + 1) {
+  var x = i;
+  fun get() { return x; }
+  sum = sum + get();
+}
+print sum;
+print clock() - start;

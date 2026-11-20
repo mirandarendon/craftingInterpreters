@@ -9,7 +9,8 @@
 #define STACK_MAX 256 // ch15q3: initial capacity
 
 typedef struct {
-  ObjClosure* closure;
+  ObjFunction* function; // ch25q1: always set
+  ObjClosure* closure;   // ch25q1: NULL unless the function has upvalues
   uint8_t* ip;
   Value* slots;
 } CallFrame;

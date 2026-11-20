@@ -1,0 +1,47 @@
+// Ch25 Challenge 3: 2D vector "objects" built from closures.
+//
+// A vector is a closure over its x and y. Calling it with a message
+// (a string) picks a "method", like obj.x or obj.add in other languages.
+
+// "Constructor": the fields are just the parameters, which the inner
+// closure captures as upvalues.
+fun Vector(x, y) {
+  // "Methods" that need arguments are closures too.
+  fun add(other) {
+    return Vector(x + other("x"), y + other("y"));
+  }
+
+  fun dispatch(message) {
+    if (message == "x") return x;
+    if (message == "y") return y;
+    if (message == "add") return add;
+    print "Unknown message: " + message;
+    return nil;
+  }
+
+  return dispatch;
+}
+
+// Helpers so calls read like method calls.
+fun getX(v) { return v("x"); }
+fun getY(v) { return v("y"); }
+fun add(a, b) { return a("add")(b); }
+
+var a = Vector(1, 2);
+var b = Vector(3, 4);
+
+print getX(a); // 1
+print getY(a); // 2
+
+var c = add(a, b);
+print getX(c); // 4
+print getY(c); // 6
+
+// Same thing, written out without helpers.
+var d = c("add")(Vector(10, 20));
+print d("x"); // 14
+print d("y"); // 26
+
+// a and b are unchanged: each vector has its own captured x and y.
+print getX(a); // 1
+print getX(b); // 3

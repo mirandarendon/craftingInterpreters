@@ -29,7 +29,7 @@ static void runtimeError(const char* format, ...) {
 
   for (int i = vm.frameCount - 1; i >= 0; i--) {
     CallFrame* frame = &vm.frames[i];
-    ObjFunction* function = frame->closure->function;
+    ObjFunction* function = frame->function; // ch25q1
     size_t instruction = frame->ip - function->chunk.code - 1;
     fprintf(stderr, "[line %d] in ",
             getLine(&function->chunk, (int)instruction)); // ch14q1
@@ -291,10 +291,12 @@ static Value peek(int distance) {
   return vm.stackTop[-1 - distance];
 }
 
-static bool call(ObjClosure* closure, int argCount) {
-  if (argCount != closure->function->arity) {
+// ch25q1: closure is NULL for a bare function
+static bool call(ObjFunction* function, ObjClosure* closure,
+                 int argCount) {
+  if (argCount != function->arity) {
     runtimeError("Expected %d arguments but got %d.",
-        closure->function->arity, argCount);
+        function->arity, argCount);
     return false;
   }
 
@@ -304,8 +306,9 @@ static bool call(ObjClosure* closure, int argCount) {
   }
 
   CallFrame* frame = &vm.frames[vm.frameCount++];
+  frame->function = function; // ch25q1
   frame->closure = closure;
-  frame->ip = closure->function->chunk.code;
+  frame->ip = function->chunk.code;
   frame->slots = vm.stackTop - argCount - 1;
   return true;
 }
@@ -313,8 +316,12 @@ static bool call(ObjClosure* closure, int argCount) {
 static bool callValue(Value callee, int argCount) {
   if (IS_OBJ(callee)) {
     switch (OBJ_TYPE(callee)) {
-      case OBJ_CLOSURE:
-        return call(AS_CLOSURE(callee), argCount);
+      case OBJ_CLOSURE: {
+        ObjClosure* closure = AS_CLOSURE(callee);
+        return call(closure->function, closure, argCount);
+      }
+      case OBJ_FUNCTION: // ch25q1: no upvalues, not wrapped
+        return call(AS_FUNCTION(callee), NULL, argCount);
       case OBJ_NATIVE: {
         ObjNative* native = AS_NATIVE(callee);
         // ch24q2: check arity like Lox functions do
@@ -399,11 +406,11 @@ static InterpretResult run() {
 #define READ_SHORT() \
     (ip += 2, (uint16_t)((ip[-2] << 8) | ip[-1]))
 #define READ_CONSTANT() \
-    (frame->closure->function->chunk.constants.values[READ_BYTE()])
+    (frame->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 // ch14q2: 24-bit index, low byte first
 #define READ_CONSTANT_LONG() \
-    (ip += 3, frame->closure->function->chunk.constants.values[ \
+    (ip += 3, frame->function->chunk.constants.values[ \
         ip[-3] | (ip[-2] << 8) | (ip[-1] << 16)])
 // ch22q4: 24-bit operand, low byte first
 #define READ_LONG() \
@@ -429,8 +436,8 @@ static InterpretResult run() {
       printf(" ]");
     }
     printf("\n");
-    disassembleInstruction(&frame->closure->function->chunk,
-        (int)(ip - frame->closure->function->chunk.code)); // ch24q1
+    disassembleInstruction(&frame->function->chunk,
+        (int)(ip - frame->function->chunk.code)); // ch24q1
 #endif
 
     uint8_t instruction;
@@ -627,10 +634,7 @@ InterpretResult interpret(const char* source) {
   if (function == NULL) return INTERPRET_COMPILE_ERROR;
 
   push(OBJ_VAL(function));
-  ObjClosure* closure = newClosure(function);
-  pop();
-  push(OBJ_VAL(closure));
-  call(closure, 0);
+  call(function, NULL, 0); // ch25q1: the script never has upvalues
 
   return run();
 }

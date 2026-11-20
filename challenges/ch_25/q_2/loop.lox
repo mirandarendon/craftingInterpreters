@@ -1,0 +1,52 @@
+// 1. each closure sees its own i
+var fs = nil; var gs = nil; var hs = nil;
+for (var i = 0; i < 3; i = i + 1) {
+  fun f() { print i; }
+  if (i == 0) fs = f;
+  if (i == 1) gs = f;
+  if (i == 2) hs = f;
+}
+fs(); gs(); hs();
+print "--";
+// 2. body changes to i still drive the loop (prints 0 2 4)
+for (var i = 0; i < 6; i = i + 1) { print i; i = i + 1; }
+print "--";
+// 3. continue keeps body changes: first loop prints nothing
+//    (i goes 0->2->3->5->6->8->9), second prints 0 6
+for (var i = 0; i < 8; i = i + 1) {
+  i = i + 2;
+  if (i > 0) { var t = i; fun k() { return t; } continue; }
+  print "unreached";
+}
+for (var i = 0; i < 8; i = i + 3) { if (i == 3) continue; print i; }
+print "--";
+// 4. closure changes the captured copy, then copy-back (prints 10, then i is 11 and the loop ends)
+for (var i = 0; i < 5; i = i + 1) {
+  fun bump() { i = i + 10; }
+  bump();
+  print i;
+}
+print "--";
+// 5. nested loops capture their own copies (prints 1 10)
+var a = nil; var b = nil;
+for (var i = 0; i < 2; i = i + 1) {
+  for (var j = 0; j < 2; j = j + 1) {
+    fun p() { print i * 10 + j; }
+    if (i == 0 and j == 1) a = p;
+    if (i == 1 and j == 0) b = p;
+  }
+}
+a(); b();
+print "--";
+// 6. loops without var / increment / condition still work (3, 0 1, 3)
+var n = 0;
+for (; n < 3;) n = n + 1;
+print n;
+for (n = 0; n < 2; n = n + 1) print n;
+fun noCond() {
+  for (var q = 0;; q = q + 1) {
+    fun z() { return q; }
+    if (q == 3) { print z(); return; }
+  }
+}
+noCond();

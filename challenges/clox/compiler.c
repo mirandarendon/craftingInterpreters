@@ -268,6 +268,19 @@ static void beginScope() {
   current->scopeDepth++;
 }
 
+// drop the newest local from the compiler; emits no code (ch25q2)
+static void forgetLocal() {
+  // ch22q1: name goes back to the local it shadowed
+  Local* local = &current->locals[current->localCount - 1];
+  if (local->shadowed == -1) {
+    tableDelete(&current->localNames, OBJ_VAL(local->key));
+  } else {
+    tableSet(&current->localNames, OBJ_VAL(local->key),
+             NUMBER_VAL(local->shadowed));
+  }
+  current->localCount--;
+}
+
 static void endScope() {
   current->scopeDepth--;
 
@@ -279,16 +292,7 @@ static void endScope() {
     } else {
       emitByte(OP_POP);
     }
-
-    // ch22q1: name goes back to the local it shadowed
-    Local* local = &current->locals[current->localCount - 1];
-    if (local->shadowed == -1) {
-      tableDelete(&current->localNames, OBJ_VAL(local->key));
-    } else {
-      tableSet(&current->localNames, OBJ_VAL(local->key),
-               NUMBER_VAL(local->shadowed));
-    }
-    current->localCount--;
+    forgetLocal();
   }
 }
 
@@ -741,6 +745,12 @@ static void function(FunctionType type) {
   block();
 
   ObjFunction* function = endCompiler();
+  // ch25q1: only wrap functions that capture something
+  if (function->upvalueCount == 0) {
+    emitConstant(OBJ_VAL(function)); // ch14q2: long form if needed
+    return;
+  }
+
   emitBytes(OP_CLOSURE, makeConstant(OBJ_VAL(function)));
 
   for (int i = 0; i < function->upvalueCount; i++) {
@@ -785,10 +795,12 @@ static void expressionStatement() {
 static void forStatement() {
   beginScope();
   consume(TOKEN_LEFT_PAREN, "Expect '(' after 'for'.");
+  int loopVar = -1; // ch25q2: slot of the loop variable, if any
   if (match(TOKEN_SEMICOLON)) {
     // No initializer.
   } else if (match(TOKEN_VAR)) {
     varDeclaration(false); // ch22q3
+    loopVar = current->localCount - 1;
   } else {
     expressionStatement();
   }
@@ -819,11 +831,59 @@ static void forStatement() {
   // ch23q2: continue goes to the increment (or condition)
   int outerStart = current->loopStart;
   int outerDepth = current->loopScopeDepth;
-  current->loopStart = loopStart;
-  current->loopScopeDepth = current->scopeDepth;
 
-  statement();
-  emitLoop(loopStart);
+  if (loopVar == -1) {
+    current->loopStart = loopStart;
+    current->loopScopeDepth = current->scopeDepth;
+
+    statement();
+    emitLoop(loopStart);
+  } else {
+    // ch25q2: each iteration gets its own copy of the loop variable, so
+    // closures made in the body capture that iteration's value.
+    //
+    //   enter:  copy = loopVar             (fresh local, body uses it)
+    //           body
+    //           jump next
+    //   next:   loopVar = copy             (keep body's changes)
+    //           pop copy (close it if captured)
+    //           jump increment/condition
+    //
+    // next sits before the body so it and continue can both jump back to it.
+    int enterJump = emitJump(OP_JUMP);
+
+    int next = currentChunk()->count;
+    int copy = current->localCount; // slot the copy will get
+    emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, copy);
+    emitLocal(OP_SET_LOCAL, OP_SET_LOCAL_LONG, loopVar);
+    emitByte(OP_POP);
+    // whether the copy is captured isn't known until the body is
+    // compiled, so patch this byte afterward
+    int closeCopy = currentChunk()->count;
+    emitByte(OP_POP);
+    emitLoop(loopStart);
+
+    patchJump(enterJump);
+    beginScope();
+    Token name = current->locals[loopVar].name;
+    emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, loopVar);
+    addLocal(name, false); // shadows the loop variable in the body
+    markInitialized();
+
+    // continue pops body locals, then runs the copy-back
+    current->loopStart = next;
+    current->loopScopeDepth = current->scopeDepth;
+
+    statement();
+    emitLoop(next);
+
+    if (current->locals[copy].isCaptured) {
+      currentChunk()->code[closeCopy] = OP_CLOSE_UPVALUE;
+    }
+    // the copy is popped at next, so only the compiler forgets it here
+    forgetLocal();
+    current->scopeDepth--;
+  }
 
   current->loopStart = outerStart; // ch23q2
   current->loopScopeDepth = outerDepth;

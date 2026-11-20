@@ -1,0 +1,11 @@
+// closures: calling a closure that reads and writes an upvalue
+fun makeCounter() {
+  var count = 0;
+  fun inc() { count = count + 1; return count; }
+  return inc;
+}
+var start = clock();
+var counter = makeCounter();
+for (var i = 0; i < 5000000; i = i + 1) counter();
+print counter();
+print clock() - start;
