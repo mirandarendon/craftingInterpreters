@@ -9,7 +9,7 @@
 #define STACK_MAX 256 // ch15q3: initial capacity
 
 typedef struct {
-  ObjFunction* function;
+  ObjClosure* closure;
   uint8_t* ip;
   Value* slots;
 } CallFrame;
@@ -27,6 +27,7 @@ typedef struct {
   ValueArray globalValues;
   bool globalConst[UINT8_COUNT]; // ch22q3: per slot, compile time
   Table strings;
+  ObjUpvalue* openUpvalues;
   Obj* objects;
 } VM;
 

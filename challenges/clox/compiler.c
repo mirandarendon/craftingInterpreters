@@ -48,7 +48,14 @@ typedef struct {
   bool isConst;   // ch22q3
   ObjString* key; // ch22q1: interned name
   int shadowed;   // ch22q1: older local with this name, or -1
+  bool isCaptured;
 } Local;
+
+typedef struct {
+  uint8_t index;
+  bool isLocal;
+  bool isConst; // ch22q3: captured consts stay read-only
+} Upvalue;
 
 typedef enum {
   TYPE_FUNCTION,
@@ -63,6 +70,7 @@ typedef struct Compiler {
   Local* locals;     // ch22q4: grows, no 256 cap
   int localCount;
   int localCapacity; // ch22q4
+  Upvalue upvalues[UINT8_COUNT];
   int scopeDepth;
   Table localNames;  // ch22q1: name -> newest local
   int loopStart;      // ch23q2: continue target, -1 if not in a loop
@@ -266,7 +274,11 @@ static void endScope() {
   while (current->localCount > 0 &&
          current->locals[current->localCount - 1].depth >
             current->scopeDepth) {
-    emitByte(OP_POP);
+    if (current->locals[current->localCount - 1].isCaptured) {
+      emitByte(OP_CLOSE_UPVALUE);
+    } else {
+      emitByte(OP_POP);
+    }
 
     // ch22q1: name goes back to the local it shadowed
     Local* local = &current->locals[current->localCount - 1];
@@ -339,6 +351,52 @@ static int resolveLocal(Compiler* compiler, Token* name) {
   return i;
 }
 
+static int addUpvalue(Compiler* compiler, uint8_t index,
+                      bool isLocal, bool isConst) {
+  int upvalueCount = compiler->function->upvalueCount;
+
+  for (int i = 0; i < upvalueCount; i++) {
+    Upvalue* upvalue = &compiler->upvalues[i];
+    if (upvalue->index == index && upvalue->isLocal == isLocal) {
+      return i;
+    }
+  }
+
+  if (upvalueCount == UINT8_COUNT) {
+    error("Too many closure variables in function.");
+    return 0;
+  }
+
+  compiler->upvalues[upvalueCount].isLocal = isLocal;
+  compiler->upvalues[upvalueCount].index = index;
+  compiler->upvalues[upvalueCount].isConst = isConst; // ch22q3
+  return compiler->function->upvalueCount++;
+}
+
+static int resolveUpvalue(Compiler* compiler, Token* name) {
+  if (compiler->enclosing == NULL) return -1;
+
+  int local = resolveLocal(compiler->enclosing, name);
+  if (local != -1) {
+    // ch22q4: locals can go past 255, but the capture operand is a byte
+    if (local > UINT8_MAX) {
+      error("Can't capture a local variable past slot 255.");
+      return -1;
+    }
+    compiler->enclosing->locals[local].isCaptured = true;
+    return addUpvalue(compiler, (uint8_t)local, true,
+                      compiler->enclosing->locals[local].isConst);
+  }
+
+  int upvalue = resolveUpvalue(compiler->enclosing, name);
+  if (upvalue != -1) {
+    return addUpvalue(compiler, (uint8_t)upvalue, false,
+                      compiler->enclosing->upvalues[upvalue].isConst);
+  }
+
+  return -1;
+}
+
 static void addLocal(Token name, bool isConst) {
   if (current->localCount == MAX_LOCALS) { // ch22q4
     error("Too many local variables in function.");
@@ -358,6 +416,7 @@ static void addLocal(Token name, bool isConst) {
   local->name = name;
   local->depth = -1;
   local->isConst = isConst; // ch22q3
+  local->isCaptured = false;
 
   // ch22q1: remember what this shadows, then point the name here
   local->key = copyString(name.start, name.length);
@@ -522,8 +581,12 @@ static void namedVariable(Token name, bool canAssign) {
   bool isConst; // ch22q3
   int arg = resolveLocal(current, &name);
   bool isLocal = arg != -1;
+  bool isUpvalue = false;
   if (isLocal) {
     isConst = current->locals[arg].isConst;
+  } else if ((arg = resolveUpvalue(current, &name)) != -1) {
+    isUpvalue = true;
+    isConst = current->upvalues[arg].isConst; // ch22q3
   } else {
     arg = globalIdentifier(&name); // ch21q2
     isConst = vm.globalConst[arg];
@@ -534,12 +597,16 @@ static void namedVariable(Token name, bool canAssign) {
     expression();
     if (isLocal) {
       emitLocal(OP_SET_LOCAL, OP_SET_LOCAL_LONG, arg); // ch22q4
+    } else if (isUpvalue) {
+      emitBytes(OP_SET_UPVALUE, (uint8_t)arg);
     } else {
       emitBytes(OP_SET_GLOBAL, (uint8_t)arg);
     }
   } else {
     if (isLocal) {
       emitLocal(OP_GET_LOCAL, OP_GET_LOCAL_LONG, arg); // ch22q4
+    } else if (isUpvalue) {
+      emitBytes(OP_GET_UPVALUE, (uint8_t)arg);
     } else {
       emitBytes(OP_GET_GLOBAL, (uint8_t)arg);
     }
@@ -674,7 +741,12 @@ static void function(FunctionType type) {
   block();
 
   ObjFunction* function = endCompiler();
-  emitConstant(OBJ_VAL(function)); // ch14q2: long form if needed
+  emitBytes(OP_CLOSURE, makeConstant(OBJ_VAL(function)));
+
+  for (int i = 0; i < function->upvalueCount; i++) {
+    emitByte(compiler.upvalues[i].isLocal ? 1 : 0);
+    emitByte(compiler.upvalues[i].index);
+  }
 }
 
 static void funDeclaration() {
@@ -850,7 +922,7 @@ static void continueStatement() {
   for (int i = current->localCount - 1;
        i >= 0 && current->locals[i].depth > current->loopScopeDepth;
        i--) {
-    emitByte(OP_POP);
+    emitByte(current->locals[i].isCaptured ? OP_CLOSE_UPVALUE : OP_POP);
   }
 
   if (current->loopStart != -1) emitLoop(current->loopStart);
